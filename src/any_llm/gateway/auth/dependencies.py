@@ -6,8 +6,9 @@ from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from any_llm.gateway.auth.models import hash_key
+from any_llm.gateway.auth.tokens import verify_access_token
 from any_llm.gateway.config import API_KEY_HEADER, GatewayConfig
-from any_llm.gateway.db import APIKey, get_db
+from any_llm.gateway.db import APIKey, SessionToken, get_db
 
 _config: GatewayConfig | None = None
 
@@ -84,6 +85,21 @@ def _verify_and_update_api_key(db: Session, token: str) -> APIKey:
 def _is_valid_master_key(token: str, config: GatewayConfig) -> bool:
     """Check if token matches the master key."""
     return config.master_key is not None and secrets.compare_digest(token, config.master_key)
+
+
+def _validate_session_token(db: Session, token: SessionToken) -> None:
+    """Validate session token state."""
+    now = datetime.now(UTC)
+    if token.revoked_at:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session revoked",
+        )
+    if token.refresh_expires_at and token.refresh_expires_at < now:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired",
+        )
 
 
 async def verify_api_key(
@@ -164,3 +180,64 @@ async def verify_api_key_or_master_key(
 
     api_key = _verify_and_update_api_key(db, token)
     return api_key, False
+
+
+async def verify_jwt_or_api_key_or_master(
+    request: Request,
+    db: Annotated[Session, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> tuple[APIKey | None, bool, str | None]:
+    """Verify JWT (access token), API key, or master key.
+
+    Returns:
+        (api_key_obj_or_none, is_master_key, user_id_or_none)
+    """
+    token = _extract_bearer_token(request, config)
+
+    if _is_valid_master_key(token, config):
+        return None, True, None
+
+    # Try access token (JWT)
+    try:
+        payload = verify_access_token(token, config)
+        jti = payload.get("jti")
+        api_key_id = payload.get("api_key_id")
+        user_id = payload.get("sub")
+        if not jti or not api_key_id or not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid access token payload",
+            )
+
+        session_token = db.query(SessionToken).filter(SessionToken.id == jti).first()
+        if not session_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Session not found",
+            )
+        _validate_session_token(db, session_token)
+
+        api_key = db.query(APIKey).filter(APIKey.id == api_key_id).first()
+        if not api_key or not api_key.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="API key for session is inactive or missing",
+            )
+        if api_key.expires_at and api_key.expires_at < datetime.now(UTC).replace(tzinfo=None):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="API key for session has expired",
+            )
+
+        session_token.last_used_at = datetime.now(UTC)
+        db.commit()
+
+        return api_key, False, str(user_id)
+    except HTTPException:
+        raise
+    except Exception:
+        # Fall back to API key verification
+        pass
+
+    api_key = _verify_and_update_api_key(db, token)
+    return api_key, False, str(api_key.user_id) if api_key.user_id else None

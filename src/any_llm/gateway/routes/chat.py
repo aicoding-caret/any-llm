@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from any_llm import AnyLLM, LLMProvider, acompletion
-from any_llm.gateway.auth import verify_api_key_or_master_key
+from any_llm.gateway.auth import verify_jwt_or_api_key_or_master
 from any_llm.gateway.auth.dependencies import get_config
 from any_llm.gateway.auth.vertex_auth import setup_vertex_environment
 from any_llm.gateway.budget import validate_user_budget
@@ -146,7 +146,7 @@ async def _log_usage(
 @router.post("/completions", response_model=None)
 async def chat_completions(
     request: ChatCompletionRequest,
-    auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    auth_result: Annotated[tuple[APIKey | None, bool, str | None], Depends(verify_jwt_or_api_key_or_master)],
     db: Annotated[Session, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> ChatCompletion | StreamingResponse:
@@ -160,7 +160,7 @@ async def chat_completions(
     - API key + user field: Use specified user (must exist)
     - API key without user field: Use virtual user created with API key
     """
-    api_key, is_master_key = auth_result
+    api_key, is_master_key, resolved_user_id = auth_result
 
     user_id: str
     if is_master_key:
@@ -170,6 +170,8 @@ async def chat_completions(
                 detail="When using master key, 'user' field is required in request body",
             )
         user_id = request.user
+    elif resolved_user_id:
+        user_id = resolved_user_id
     elif request.user:
         user_id = request.user
     else:

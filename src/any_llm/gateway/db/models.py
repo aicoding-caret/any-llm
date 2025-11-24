@@ -96,6 +96,8 @@ class User(Base):
     api_keys = relationship("APIKey", back_populates="user", cascade="all, delete-orphan")
     usage_logs = relationship("UsageLog", back_populates="user", cascade="all, delete-orphan")
     reset_logs = relationship("BudgetResetLog", back_populates="user")
+    caret_user = relationship("CaretUser", back_populates="user", uselist=False, cascade="all, delete-orphan")
+    session_tokens = relationship("SessionToken", back_populates="user", cascade="all, delete-orphan")
 
     def to_dict(self) -> dict[str, Any]:
         """Convert model to dictionary."""
@@ -179,6 +181,83 @@ class UsageLog(Base):
             "cost": self.cost,
             "status": self.status,
             "error_message": self.error_message,
+        }
+
+
+class CaretUser(Base):
+    """Caret user mapping between social provider and gateway user."""
+
+    __tablename__ = "caret_users"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), unique=True, index=True)
+    provider: Mapped[str] = mapped_column(index=True)
+    provider_user_id: Mapped[str] = mapped_column(index=True)
+    email: Mapped[str | None] = mapped_column()
+    name: Mapped[str | None] = mapped_column()
+    avatar_url: Mapped[str | None] = mapped_column()
+    refresh_token: Mapped[str | None] = mapped_column()
+    access_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+    user = relationship("User", back_populates="caret_user")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert model to dictionary."""
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "provider": self.provider,
+            "provider_user_id": self.provider_user_id,
+            "email": self.email,
+            "name": self.name,
+            "avatar_url": self.avatar_url,
+            "refresh_token": self.refresh_token,
+            "access_token_expires_at": self.access_token_expires_at.isoformat() if self.access_token_expires_at else None,
+            "last_login_at": self.last_login_at.isoformat() if self.last_login_at else None,
+            "metadata": self.metadata_,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class SessionToken(Base):
+    """Refresh/session token state for JWT-based access tokens."""
+
+    __tablename__ = "session_tokens"
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
+    api_key_id: Mapped[str] = mapped_column(ForeignKey("api_keys.id", ondelete="CASCADE"), index=True)
+    refresh_token_hash: Mapped[str] = mapped_column(index=True, unique=True)
+    refresh_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSON, default=dict)
+
+    user = relationship("User", back_populates="session_tokens")
+    api_key = relationship("APIKey")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert model to dictionary."""
+        return {
+            "id": self.id,
+            "user_id": self.user_id,
+            "api_key_id": self.api_key_id,
+            "refresh_token_hash": self.refresh_token_hash,
+            "refresh_expires_at": self.refresh_expires_at.isoformat() if self.refresh_expires_at else None,
+            "revoked_at": self.revoked_at.isoformat() if self.revoked_at else None,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "last_used_at": self.last_used_at.isoformat() if self.last_used_at else None,
+            "metadata": self.metadata_,
         }
 
 

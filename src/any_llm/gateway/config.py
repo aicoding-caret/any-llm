@@ -43,6 +43,9 @@ class GatewayConfig(BaseSettings):
         default_factory=dict,
         description="Pre-configured model USD pricing (model_key -> {input_price_per_million, output_price_per_million})",
     )
+    jwt_secret: str | None = Field(default=None, description="Signing secret for access/refresh tokens (falls back to master key)")
+    access_token_exp_minutes: int = Field(default=30, description="Access token lifetime in minutes")
+    refresh_token_exp_days: int = Field(default=14, description="Refresh token lifetime in days")
 
 
 def load_config(config_path: str | None = None) -> GatewayConfig:
