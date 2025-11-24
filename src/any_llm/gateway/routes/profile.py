@@ -108,6 +108,31 @@ class KeySummary(BaseModel):
     metadata: dict
 
 
+class LogItem(BaseModel):
+    """사용 로그 아이템."""
+
+    id: str
+    timestamp: str
+    model: str
+    provider: str | None
+    endpoint: str
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    total_tokens: int | None
+    cost: float | None
+    status: str
+    error_message: str | None
+    api_key_id: str | None
+    user_id: str | None
+
+
+class LogsResponse(BaseModel):
+    """사용 로그 응답."""
+
+    total: int
+    items: list[LogItem]
+
+
 def _now_naive() -> datetime:
     """UTC now without tzinfo (DB 저장 방식과 동일)."""
     return datetime.now(UTC).replace(tzinfo=None)
@@ -375,3 +400,93 @@ async def list_profile_keys(
         )
         for key in keys
     ]
+
+
+@router.get("/logs")
+async def list_profile_logs(
+    auth_result: Annotated[tuple[APIKey | None, bool, str | None], Depends(verify_jwt_or_api_key_or_master)],
+    db: Annotated[Session, Depends(get_db)],
+    user: Annotated[str | None, Query(default=None, description="마스터 키 사용 시 조회할 user_id")],
+    limit: Annotated[int, Query(default=50, ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(default=0, ge=0)] = 0,
+    start: Annotated[datetime | None, Query(default=None, description="시작 시각(ISO)")] = None,
+    end: Annotated[datetime | None, Query(default=None, description="종료 시각(ISO)")] = None,
+    status: Annotated[str | None, Query(default=None, description="success 또는 error")] = None,
+    model: Annotated[str | None, Query(default=None, description="모델 키 필터")] = None,
+    provider: Annotated[str | None, Query(default=None, description="프로바이더 필터")] = None,
+    endpoint: Annotated[str | None, Query(default=None, description="엔드포인트 필터")] = None,
+    min_prompt_tokens: Annotated[int | None, Query(default=None)] = None,
+    max_prompt_tokens: Annotated[int | None, Query(default=None)] = None,
+    min_completion_tokens: Annotated[int | None, Query(default=None)] = None,
+    max_completion_tokens: Annotated[int | None, Query(default=None)] = None,
+    min_total_tokens: Annotated[int | None, Query(default=None)] = None,
+    max_total_tokens: Annotated[int | None, Query(default=None)] = None,
+    min_cost: Annotated[float | None, Query(default=None)] = None,
+    max_cost: Annotated[float | None, Query(default=None)] = None,
+) -> LogsResponse:
+    """사용자 로그 목록(필터/페이지네이션)."""
+    target_user_id = _resolve_target_user(auth_result, user)
+
+    start_dt = _ensure_naive(start) if start else None
+    end_dt = _ensure_naive(end) if end else None
+    if start_dt and end_dt and start_dt > end_dt:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="start must be before end")
+
+    query = db.query(UsageLog).filter(UsageLog.user_id == target_user_id)
+    if start_dt:
+        query = query.filter(UsageLog.timestamp >= start_dt)
+    if end_dt:
+        query = query.filter(UsageLog.timestamp <= end_dt)
+    if status:
+        query = query.filter(UsageLog.status == status)
+    if model:
+        query = query.filter(UsageLog.model == model)
+    if provider:
+        query = query.filter(UsageLog.provider == provider)
+    if endpoint:
+        query = query.filter(UsageLog.endpoint == endpoint)
+    if min_prompt_tokens is not None:
+        query = query.filter(UsageLog.prompt_tokens >= min_prompt_tokens)
+    if max_prompt_tokens is not None:
+        query = query.filter(UsageLog.prompt_tokens <= max_prompt_tokens)
+    if min_completion_tokens is not None:
+        query = query.filter(UsageLog.completion_tokens >= min_completion_tokens)
+    if max_completion_tokens is not None:
+        query = query.filter(UsageLog.completion_tokens <= max_completion_tokens)
+    if min_total_tokens is not None:
+        query = query.filter(UsageLog.total_tokens >= min_total_tokens)
+    if max_total_tokens is not None:
+        query = query.filter(UsageLog.total_tokens <= max_total_tokens)
+    if min_cost is not None:
+        query = query.filter(UsageLog.cost >= min_cost)
+    if max_cost is not None:
+        query = query.filter(UsageLog.cost <= max_cost)
+
+    total = query.count()
+    logs = (
+        query.order_by(UsageLog.timestamp.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+
+    items = [
+        LogItem(
+            id=log.id,
+            timestamp=log.timestamp.isoformat(),
+            model=log.model,
+            provider=log.provider,
+            endpoint=log.endpoint,
+            prompt_tokens=log.prompt_tokens,
+            completion_tokens=log.completion_tokens,
+            total_tokens=log.total_tokens,
+            cost=log.cost,
+            status=log.status,
+            error_message=log.error_message,
+            api_key_id=log.api_key_id,
+            user_id=log.user_id,
+        )
+        for log in logs
+    ]
+
+    return LogsResponse(total=int(total), items=items)
