@@ -30,11 +30,11 @@ class ProfileInfo(BaseModel):
     user_id: str
     provider: str | None
     role: str | None
-    alias: str | None
     name: str | None
     email: str | None
     avatar_url: str | None
     blocked: bool
+    spend: float
     metadata: dict
     caret_metadata: dict
     last_login_at: str | None
@@ -70,9 +70,7 @@ class ProfileResponse(BaseModel):
     """프로필 응답."""
 
     profile: ProfileInfo
-    budget: BudgetInfo | None
     usage: dict[str, UsageWindow]
-    # recent_usage: list[UsageLogItem]
 
 
 class UsageBucket(BaseModel):
@@ -201,7 +199,6 @@ async def get_profile(
     auth_result: Annotated[tuple[APIKey | None, bool, str | None], Depends(verify_jwt_or_api_key_or_master)],
     db: Annotated[Session, Depends(get_db)],
     user: str | None = Query(None, description="마스터 키 사용 시 조회할 user_id"),
-    recent_limit: int = Query(10, ge=0, le=100, description="최근 사용 로그 개수"),
 ) -> ProfileResponse:
     """프로필 + 예산 + 사용량 집계 반환."""
     target_user_id = resolve_target_user(
@@ -214,22 +211,22 @@ async def get_profile(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User '{target_user_id}' not found")
 
     caret = db.query(CaretUser).filter(CaretUser.user_id == target_user_id).first()
-    budget = db.query(Budget).filter(Budget.budget_id == user_obj.budget_id).first() if user_obj.budget_id else None
 
     now = _now_naive()
+    start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_of_week = start_of_day - timedelta(days=start_of_day.weekday())
+    start_of_month = start_of_day.replace(day=1)
     usage_windows = {
-        "last_24h": _aggregate_usage(db, target_user_id, now - timedelta(hours=24)),
-        "last_7d": _aggregate_usage(db, target_user_id, now - timedelta(days=7)),
-        "last_30d": _aggregate_usage(db, target_user_id, now - timedelta(days=30)),
+        "today": _aggregate_range(db, target_user_id, start_of_day, now),
+        "this_week": _aggregate_range(db, target_user_id, start_of_week, now),
+        "this_month": _aggregate_range(db, target_user_id, start_of_month, now),
     }
-
-    # recent_logs = _recent_usage(db, target_user_id, recent_limit)
 
     profile = ProfileInfo(
         user_id=user_obj.user_id,
         provider=caret.provider if caret else None,
         role=caret.role if caret else None,
-        alias=user_obj.alias,
+        spend=float(user_obj.spend),
         name=caret.name if caret else user_obj.alias,
         email=caret.email if caret else None,
         avatar_url=caret.avatar_url if caret else None,
@@ -239,24 +236,9 @@ async def get_profile(
         last_login_at=caret.last_login_at.isoformat() if caret and caret.last_login_at else None,
     )
 
-    budget_info = (
-        BudgetInfo(
-            budget_id=budget.budget_id,
-            max_budget=budget.max_budget,
-            budget_duration_sec=budget.budget_duration_sec,
-            spend=float(user_obj.spend),
-            budget_started_at=user_obj.budget_started_at.isoformat() if user_obj.budget_started_at else None,
-            next_budget_reset_at=user_obj.next_budget_reset_at.isoformat() if user_obj.next_budget_reset_at else None,
-        )
-        if budget
-        else None
-    )
-
     return ProfileResponse(
         profile=profile,
-        budget=budget_info,
         usage=usage_windows,
-        # recent_usage=recent_logs,
     )
 
 
