@@ -3,7 +3,9 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status
+from urllib.parse import urlencode
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -37,6 +39,22 @@ class RefreshRequest(BaseModel):
 
     refresh_token: str
 
+
+class TokenRequest(BaseModel):
+    """Provider code로 토큰 교환 요청."""
+
+    code: str
+    provider: str | None = None
+    client_type: str | None = None
+
+
+class TokenResponse(BaseModel):
+    """토큰 교환 응답."""
+
+    access_token: str
+    refresh_token: str
+    expires_at: str | None = None
+    user_info: dict[str, Any] | None = None
 
 class LogoutRequest(BaseModel):
     """로그아웃 요청."""
@@ -72,6 +90,12 @@ class MeResponse(BaseModel):
 
     profile: dict[str, Any]
     budget: BudgetInfo | None
+
+
+class AuthorizeResponse(BaseModel):
+    """인가 요청 응답."""
+
+    redirect_url: str
 
 
 def _normalize_profile(request: SocialLoginRequest) -> dict[str, Any]:
@@ -129,6 +153,7 @@ def _issue_tokens(
     db: Session,
     user_id: str,
     metadata: dict[str, Any] | None = None,
+    provider_token: str | None = None,
 ) -> tuple[str, str, datetime, datetime]:
     """access/refresh 토큰 발급 + 세션 저장."""
     jti = str(uuid.uuid4())
@@ -146,6 +171,8 @@ def _issue_tokens(
         user_id=user_id,
         refresh_token_hash=refresh_hash,
         refresh_token_plain=refresh_token,
+        access_token_plain=access_token,
+        provider_token=provider_token,
         refresh_expires_at=refresh_exp,
         created_at=now,
         last_used_at=now,
@@ -159,6 +186,72 @@ def jwt_exp(token: str) -> int:
     """JWT exp 클레임을 추출."""
     payload = jwt.decode(token, options={"verify_signature": False})
     return int(payload["exp"])
+
+
+@router.get("/authorize", response_model=AuthorizeResponse)
+async def authorize(
+    callback_url: Annotated[str, Query(..., description="로그인 후 돌아올 콜백 URL (예: vscode://caretive.caret/auth)")],
+    client_type: Annotated[str, Query(default="extension", description="클라이언트 유형")] = "extension",
+    redirect_uri: Annotated[str | None, Query(default=None, description="명시적 리디렉션 URI (없으면 callback_url 사용)")] = None,
+) -> AuthorizeResponse:
+    """인가 리디렉트 URL을 생성해 반환."""
+    if not callback_url:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="callback_url is required")
+
+    base = "https://caret.team"
+    params = {
+        "client_type": client_type or "extension",
+        "callback_url": callback_url,
+    }
+    redirect_url = f"{base}/auth?{urlencode(params)}"
+    return AuthorizeResponse(redirect_url=redirect_url)
+
+
+@router.post("/token", response_model=TokenResponse)
+async def exchange_token(
+    request: TokenRequest,
+    db: Annotated[Session, Depends(get_db)],
+) -> TokenResponse:
+    """provider code로 저장된 세션을 조회해 access/refresh 토큰을 반환."""
+    if not request.code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="code is required")
+
+    session: SessionToken | None = (
+        db.query(SessionToken, CaretUser)
+        .join(User, User.user_id == SessionToken.user_id)
+        .join(CaretUser, CaretUser.user_id == User.user_id, isouter=True)
+        .filter(SessionToken.provider_token == request.code)
+        .order_by(SessionToken.created_at.desc())
+        .first()
+    )
+    now = datetime.now(UTC)
+    if not session or session.SessionToken.refresh_expires_at < now or session.SessionToken.revoked_at:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid or expired code")
+
+    if not session.SessionToken.refresh_token_plain or not session.SessionToken.access_token_plain:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="session missing tokens")
+
+    token_row: SessionToken = session.SessionToken
+    caret_row: CaretUser | None = session.CaretUser
+    user_info = {
+        "id": caret_row.id,
+        "email": caret_row.email if caret_row else "",
+        "name": caret_row.name if caret_row else "",
+        "subject": caret_row.provider if caret_row else "",
+    }
+
+    try:
+        access_exp = datetime.fromtimestamp(jwt_exp(token_row.access_token_plain), tz=UTC)
+        expires_at = access_exp.isoformat()
+    except Exception:
+        expires_at = None
+
+    return TokenResponse(
+        access_token=token_row.access_token_plain,
+        refresh_token=token_row.refresh_token_plain,
+        expires_at=expires_at,
+        user_info=user_info,
+    )
 
 
 @router.post("/login")
@@ -188,7 +281,7 @@ async def social_login(
             alias=profile.get("name"),
             budget_id=budget.budget_id,
             blocked=False,
-            metadata_=request.metadata,
+        metadata_=request.metadata,
             budget_started_at=datetime.now(UTC),
             next_budget_reset_at=datetime.now(UTC) + timedelta(days=30),
         )
@@ -213,11 +306,16 @@ async def social_login(
         if not user:
             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Linked user missing")
 
+    provider_token = None
+    if request.metadata:
+        provider_token = request.metadata.get("provider_token")
+
     access_token, refresh_token, access_exp, refresh_exp = _issue_tokens(
         config,
         db,
         user.user_id,
         metadata=profile.get("device"),
+        provider_token=provider_token,
     )
     db.commit()
 
@@ -236,25 +334,30 @@ async def refresh_token(
     request: RefreshRequest,
     db: Annotated[Session, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-) -> TokenBundle:
+) -> TokenResponse:
     """Access/refresh 토큰 재발급."""
     refresh_hash = hash_token(request.refresh_token)
     session = (
-        db.query(SessionToken)
+        db.query(SessionToken, CaretUser)
+        .join(User, User.user_id == SessionToken.user_id)
+        .join(CaretUser, CaretUser.user_id == User.user_id, isouter=True)
         .filter(SessionToken.refresh_token_hash == refresh_hash)
         .first()
     )
     if not session:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
 
+    session_row: SessionToken = session.SessionToken
+    caret_row: CaretUser | None = session.CaretUser
+
     now = datetime.now(UTC)
-    if session.revoked_at:
+    if session_row.revoked_at:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token revoked")
-    if session.refresh_expires_at and session.refresh_expires_at < now:
+    if session_row.refresh_expires_at and session_row.refresh_expires_at < now:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
 
     # Rotate refresh token
-    session.revoked_at = now
+    session_row.revoked_at = now
 
     new_refresh = generate_refresh_token()
     new_refresh_hash = hash_token(new_refresh)
@@ -262,30 +365,37 @@ async def refresh_token(
 
     new_session = SessionToken(
         id=str(uuid.uuid4()),
-        user_id=session.user_id,
+        user_id=session_row.user_id,
         refresh_token_hash=new_refresh_hash,
         refresh_token_plain=new_refresh,
+        access_token_plain=access_token,
         refresh_expires_at=refresh_exp,
         created_at=now,
         last_used_at=now,
-        metadata_=session.metadata_ if session.metadata_ else {},
+        metadata_=session_row.metadata_ if session_row.metadata_ else {},
     )
     db.add(new_session)
 
     access_token = sign_access_token(
-        user_id=session.user_id,
+        user_id=session_row.user_id,
         config=config,
         jti=new_session.id,
     )
-
     db.commit()
 
     access_exp = datetime.fromtimestamp(jwt_exp(access_token), tz=UTC)
-    return TokenBundle(
+    user_info = {
+        "id": caret_row.id,
+        "email": caret_row.email if caret_row else "",
+        "name": caret_row.name if caret_row else "",
+        "subject": caret_row.provider if caret_row else "",
+    }
+
+    return TokenResponse(
         access_token=access_token,
-        access_token_expires_at=access_exp.isoformat(),
         refresh_token=new_refresh,
-        refresh_token_expires_at=refresh_exp.isoformat(),
+        expires_at=access_exp.isoformat(),
+        user_info=user_info,
     )
 
 

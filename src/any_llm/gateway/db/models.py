@@ -233,6 +233,8 @@ class SessionToken(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
     refresh_token_hash: Mapped[str] = mapped_column(index=True, unique=True)
     refresh_token_plain: Mapped[str | None] = mapped_column()
+    access_token_plain: Mapped[str | None] = mapped_column()
+    provider_token: Mapped[str | None] = mapped_column(index=True)
     refresh_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
@@ -248,6 +250,8 @@ class SessionToken(Base):
             "user_id": self.user_id,
             "refresh_token_hash": self.refresh_token_hash,
             "refresh_token_plain": self.refresh_token_plain,
+            "access_token_plain": self.access_token_plain,
+            "provider_token": self.provider_token,
             "refresh_expires_at": self.refresh_expires_at.isoformat() if self.refresh_expires_at else None,
             "revoked_at": self.revoked_at.isoformat() if self.revoked_at else None,
             "created_at": self.created_at.isoformat() if self.created_at else None,
