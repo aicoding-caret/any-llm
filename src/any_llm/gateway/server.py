@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 
 from any_llm.gateway import __version__
 from any_llm.gateway.auth.dependencies import set_config
@@ -32,6 +33,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         title="any-llm-gateway",
         description="A clean FastAPI gateway for any-llm with API key management",
         version=__version__,
+        swagger_ui_parameters={"persistAuthorization": True},
     )
 
     app.add_middleware(
@@ -50,5 +52,10 @@ def create_app(config: GatewayConfig) -> FastAPI:
     app.include_router(pricing.router)
     app.include_router(profile.router)
     app.include_router(health.router)
+
+    @app.get("/", include_in_schema=False)
+    async def redirect_to_docs() -> RedirectResponse:
+        """Redirect root requests to interactive API docs."""
+        return RedirectResponse(url="/docs")
 
     return app

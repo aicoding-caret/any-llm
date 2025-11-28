@@ -2,16 +2,23 @@ import secrets
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Security, status
+from fastapi.security import APIKeyHeader
 from sqlalchemy.orm import Session
 
 from any_llm.gateway.auth.models import hash_key
 from any_llm.gateway.auth.tokens import verify_access_token
 from any_llm.gateway.config import API_KEY_HEADER, GatewayConfig
 from any_llm.gateway.db import APIKey, SessionToken, get_db
-from any_llm.gateway.log_config import logger
 
 _config: GatewayConfig | None = None
+
+api_key_header = APIKeyHeader(
+    name=API_KEY_HEADER,
+    scheme_name="AnyLLMKey",
+    auto_error=False,
+    description="Use 'Bearer <access/master/api key>' for authenticated requests",
+)
 
 
 def set_config(config: GatewayConfig) -> None:
@@ -28,10 +35,9 @@ def get_config() -> GatewayConfig:
     return _config
 
 
-def _extract_bearer_token(request: Request, config: GatewayConfig) -> str:
+def _extract_bearer_token(auth_header: str | None) -> str:
     """Extract and validate Bearer token from request header."""
-    logger.info("request.headers", request.headers)
-    x_anyllm_key = request.headers.get(API_KEY_HEADER)
+    x_anyllm_key = auth_header
 
     if not x_anyllm_key:
         raise HTTPException(
@@ -105,14 +111,14 @@ def _validate_session_token(db: Session, token: SessionToken) -> None:
 
 
 async def verify_api_key(
-    request: Request,
+    auth_header: Annotated[str | None, Security(api_key_header)],
     db: Annotated[Session, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> APIKey:
     """Verify API key from X-AnyLLM-Key header.
 
     Args:
-        request: FastAPI request object
+        auth_header: Raw header value from request
         db: Database session
         config: Gateway configuration
 
@@ -123,18 +129,18 @@ async def verify_api_key(
         HTTPException: If key is invalid, inactive, or expired
 
     """
-    token = _extract_bearer_token(request, config)
+    token = _extract_bearer_token(auth_header)
     return _verify_and_update_api_key(db, token)
 
 
 async def verify_master_key(
-    request: Request,
+    auth_header: Annotated[str | None, Security(api_key_header)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> None:
     """Verify master key from X-AnyLLM-Key header.
 
     Args:
-        request: FastAPI request object
+        auth_header: Raw header value from request
         config: Gateway configuration
 
     Raises:
@@ -147,7 +153,7 @@ async def verify_master_key(
             detail="Master key not configured. Set GATEWAY_MASTER_KEY environment variable.",
         )
 
-    token = _extract_bearer_token(request, config)
+    token = _extract_bearer_token(auth_header)
 
     if not _is_valid_master_key(token, config):
         raise HTTPException(
@@ -157,14 +163,14 @@ async def verify_master_key(
 
 
 async def verify_api_key_or_master_key(
-    request: Request,
+    auth_header: Annotated[str | None, Security(api_key_header)],
     db: Annotated[Session, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> tuple[APIKey | None, bool]:
     """Verify either API key or master key from X-AnyLLM-Key header.
 
     Args:
-        request: FastAPI request object
+        auth_header: Raw header value from request
         db: Database session
         config: Gateway configuration
 
@@ -175,7 +181,7 @@ async def verify_api_key_or_master_key(
         HTTPException: If key is invalid, inactive, or expired
 
     """
-    token = _extract_bearer_token(request, config)
+    token = _extract_bearer_token(auth_header)
 
     if _is_valid_master_key(token, config):
         return None, True
@@ -185,7 +191,7 @@ async def verify_api_key_or_master_key(
 
 
 async def verify_jwt_or_api_key_or_master(
-    request: Request,
+    auth_header: Annotated[str | None, Security(api_key_header)],
     db: Annotated[Session, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> tuple[APIKey | None, bool, str | None, SessionToken | None]:
@@ -194,7 +200,7 @@ async def verify_jwt_or_api_key_or_master(
     Returns:
         (api_key_obj_or_none, is_master_key, user_id_or_none, session_token_or_none)
     """
-    token = _extract_bearer_token(request, config)
+    token = _extract_bearer_token(auth_header)
 
     if _is_valid_master_key(token, config):
         return None, True, None, None

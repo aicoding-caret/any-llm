@@ -19,6 +19,16 @@ from any_llm.gateway.log_config import logger
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
 
 
+def _mask_token(token: str | None, *, keep: int = 4) -> str:
+    """Return a masked token representation for safe logging."""
+    if not token:
+        return "<empty>"
+    token = token.strip()
+    if len(token) <= keep * 2:
+        return f"{token[:keep]}...len={len(token)}"
+    return f"{token[:keep]}...{token[-keep:]}(len={len(token)})"
+
+
 class SocialLoginRequest(BaseModel):
     """소셜 로그인 요청."""
 
@@ -109,6 +119,14 @@ class AuthorizeResponse(BaseModel):
     """인가 요청 응답."""
 
     redirect_url: str
+
+
+def _normalize_refresh_token(raw: str) -> str:
+    """Strip bearer prefix/spaces to accept tokens stored with or without 'Bearer '."""
+    token = raw.strip()
+    if token.lower().startswith("bearer "):
+        return token[7:].strip()
+    return token
 
 
 def _normalize_profile(request: SocialLoginRequest) -> dict[str, Any]:
@@ -249,12 +267,13 @@ async def authorize(
     callback_url: Annotated[str, Query(..., description="로그인 후 돌아올 콜백 URL (예: vscode://caretive.caret/auth)")],
     client_type: Annotated[str, Query(description="클라이언트 유형")] = "extension",
     redirect_uri: Annotated[str | None, Query(description="명시적 리디렉션 URI (없으면 callback_url 사용)")] = None,
+    config: Annotated[GatewayConfig, Depends(get_config)] = None,
 ) -> AuthorizeResponse:
     """인가 리디렉트 URL을 생성해 반환."""
     if not callback_url:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="callback_url is required")
 
-    base = "http://localhost:4001"
+    base = config.auth_base_url if config else "http://localhost:4001"
     params = {
         "client_type": client_type or "extension",
         "callback_url": callback_url,
@@ -294,6 +313,7 @@ async def exchange_token(
         "email": caret_row.email if caret_row else "",
         "name": caret_row.name if caret_row else "",
         "subject": caret_row.provider if caret_row else "",
+        "photoUrl": caret_row.avatar_url if caret_row else "",
         "accounts": [],
     }
 
@@ -396,7 +416,11 @@ async def refresh_token(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> TokenResponse:
     """Access/refresh 토큰 재발급."""
-    refresh_hash = hash_token(request.refreshToken)
+    logger.info("refresh_token request received", extra={"refresh_raw": _mask_token(request.refreshToken)})
+    normalized_refresh = _normalize_refresh_token(request.refreshToken)
+    logger.info("refresh_token normalized", extra={"refresh_normalized": _mask_token(normalized_refresh)})
+    refresh_hash = hash_token(normalized_refresh)
+    logger.info("refresh_token hash calculated", extra={"refresh_hash": refresh_hash})
     session = (
         db.query(SessionToken, CaretUser)
         .join(User, User.user_id == SessionToken.user_id)
@@ -405,6 +429,7 @@ async def refresh_token(
         .first()
     )
     if not session:
+        logger.warning("refresh_token session lookup failed", extra={"refresh_hash": refresh_hash})
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid refresh token")
 
     session_row: SessionToken = session.SessionToken
@@ -412,8 +437,13 @@ async def refresh_token(
 
     now = datetime.now(UTC)
     if session_row.revoked_at:
+        logger.info("refresh_token denied: revoked", extra={"session_id": session_row.id})
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token revoked")
     if session_row.refresh_expires_at and session_row.refresh_expires_at < now:
+        logger.info(
+            "refresh_token denied: expired",
+            extra={"session_id": session_row.id, "refresh_expires_at": session_row.refresh_expires_at.isoformat()},
+        )
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Refresh token expired")
 
     # Rotate refresh token
@@ -444,6 +474,16 @@ async def refresh_token(
     )
     db.add(new_session)
     db.commit()
+    logger.info(
+        "refresh_token rotated",
+        extra={
+            "old_session_id": session_row.id,
+            "new_session_id": new_session_id,
+            "user_id": session_row.user_id,
+            "new_refresh": _mask_token(new_refresh),
+            "refresh_expires_at": refresh_exp.isoformat(),
+        },
+    )
 
     access_exp = datetime.fromtimestamp(jwt_exp(access_token), tz=UTC)
     user_info = {
@@ -451,6 +491,7 @@ async def refresh_token(
         "email": caret_row.email if caret_row else "",
         "name": caret_row.name if caret_row else "",
         "subject": caret_row.provider if caret_row else "",
+        "photoUrl": caret_row.avatar_url if caret_row else "",
         "accounts": [],
     }
 
@@ -472,15 +513,21 @@ async def logout(
     db: Annotated[Session, Depends(get_db)],
 ) -> None:
     """세션(리프레시 토큰) 폐기."""
-    refresh_hash = hash_token(request.refresh_token)
+    logger.debug("logout request received", extra={"refresh_raw": _mask_token(request.refresh_token)})
+    normalized_refresh = _normalize_refresh_token(request.refresh_token)
+    refresh_hash = hash_token(normalized_refresh)
+    logger.debug("logout normalized/hash", extra={"refresh_normalized": _mask_token(normalized_refresh), "refresh_hash": refresh_hash})
     session = (
         db.query(SessionToken)
         .filter(SessionToken.refresh_token_hash == refresh_hash)
         .first()
     )
     if session:
+        logger.debug("logout session revoked", extra={"session_id": session.id, "user_id": session.user_id})
         session.revoked_at = datetime.now(UTC)
         db.commit()
+    else:
+        logger.warning("logout session not found", extra={"refresh_hash": refresh_hash})
 
 
 @router.get("/me")

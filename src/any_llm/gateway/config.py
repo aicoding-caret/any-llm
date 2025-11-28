@@ -46,6 +46,10 @@ class GatewayConfig(BaseSettings):
     jwt_secret: str | None = Field(default=None, description="Signing secret for access/refresh tokens (falls back to master key)")
     access_token_exp_minutes: int = Field(default=30, description="Access token lifetime in minutes")
     refresh_token_exp_days: int = Field(default=14, description="Refresh token lifetime in days")
+    auth_base_url: str = Field(
+        default="http://localhost:4001",
+        description="Base URL used to build authorization redirect links (e.g., frontend origin)",
+    )
 
 
 def load_config(config_path: str | None = None) -> GatewayConfig:
