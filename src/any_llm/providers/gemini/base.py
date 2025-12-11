@@ -184,7 +184,7 @@ class GoogleProvider(AnyLLM):
         )
 
     @staticmethod
-    def _convert_completion_chunk_response(response: Any, **kwargs: Any) -> ChatCompletionChunk:
+    def _convert_completion_chunk_response(response: Any, **kwargs: Any) -> ChatCompletionChunk | None:
         """Convert Google chunk response to OpenAI format."""
         return _create_openai_chunk_from_google_chunk(response)
 
@@ -235,7 +235,10 @@ class GoogleProvider(AnyLLM):
 
             async def _stream() -> AsyncIterator[ChatCompletionChunk]:
                 async for chunk in response_stream:
-                    yield self._convert_completion_chunk_response(chunk)
+                    converted = self._convert_completion_chunk_response(chunk)
+                    if converted is None:
+                        continue
+                    yield converted
 
             return _stream()
 

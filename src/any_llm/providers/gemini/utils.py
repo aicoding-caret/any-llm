@@ -232,19 +232,25 @@ def _create_openai_embedding_response_from_google(
 
 def _create_openai_chunk_from_google_chunk(
     response: types.GenerateContentResponse,
-) -> ChatCompletionChunk:
-    """Convert a Google GenerateContentResponse to an OpenAI ChatCompletionChunk."""
+) -> ChatCompletionChunk | None:
+    """Convert a Google GenerateContentResponse to an OpenAI ChatCompletionChunk.
 
-    assert response.candidates
+    일부 청크는 usage 메타데이터만 포함하거나 content가 비어 있을 수 있다. 이런 경우
+    빈/메타 청크는 건너뛰거나 usage만 전달한다.
+    """
+
+    if not getattr(response, "candidates", None):
+        return None
+
     candidate = response.candidates[0]
-    assert candidate.content
-    assert candidate.content.parts
+    content_obj = getattr(candidate, "content", None)
+    parts = getattr(content_obj, "parts", None) or []
 
     content = ""
     reasoning_content = ""
 
-    for part in candidate.content.parts:
-        if part.thought:
+    for part in parts:
+        if getattr(part, "thought", False):
             reasoning_content += part.text or ""
         else:
             content += part.text or ""
@@ -255,19 +261,25 @@ def _create_openai_chunk_from_google_chunk(
         reasoning=Reasoning(content=reasoning_content) if reasoning_content else None,
     )
 
-    choice = ChunkChoice(
-        index=0,
-        delta=delta,
-        finish_reason="stop" if getattr(candidate.finish_reason, "value", None) == "STOP" else None,
-    )
+    finish_reason = "stop" if getattr(getattr(candidate, "finish_reason", None), "value", None) == "STOP" else None
 
     usage = None
-    if response.usage_metadata:
+    if getattr(response, "usage_metadata", None):
         usage = CompletionUsage(
             prompt_tokens=response.usage_metadata.prompt_token_count or 0,
             completion_tokens=response.usage_metadata.candidates_token_count or 0,
             total_tokens=response.usage_metadata.total_token_count or 0,
         )
+
+    # 완전히 빈 청크(내용/usage/finish_reason 없음)는 건너뛴다.
+    if not parts and usage is None and finish_reason is None:
+        return None
+
+    choice = ChunkChoice(
+        index=0,
+        delta=delta,
+        finish_reason=finish_reason,
+    )
 
     return ChatCompletionChunk(
         id=f"chatcmpl-{time()}",

@@ -348,7 +348,14 @@ async def social_login(
     profile = _normalize_profile(request)
     logger.info(f"Social login: {profile}")
 
-    caret_user = db.query(CaretUser).filter(CaretUser.provider == profile["provider"]).first()
+    caret_user = (
+        db.query(CaretUser)
+        .filter(
+            CaretUser.provider == profile["provider"],
+            CaretUser.email == profile["email"],
+        )
+        .first()
+    )
 
     is_new_user = caret_user is None
     user: User
