@@ -36,7 +36,8 @@ providers:
     api_key: YOUR_MISTRAL_API_KEY_HERE
 
   gemini:
-    api_key: AIzaSyArNYXRKdzMUp2bthMHiRAsI9YYHDeUAcI
+    api_key: AIzaSyAizXiSXHMYA3_9eKUaU-BMb4ORxNjrulk
+
 
 
   # Add more providers as needed...
