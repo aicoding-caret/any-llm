@@ -266,6 +266,29 @@ def _ensure_free_plan_and_balance(db: Session, user_id: str, now: datetime) -> N
     )
     db.add(topup)
 
+
+    bonus_balance = CreditBalance(
+        user_id=user_id,
+        pool_type="BONUS",
+        source_id=plan.id,
+        amount=float(plan.monthly_bonus_credits),
+        expires_at=expires_at,
+        priority=1,
+    )
+    db.add(bonus_balance)
+
+    bonus_topup = CreditTopup(
+        user_id=user_id,
+        pool_type="BONUS",
+        amount=float(plan.monthly_bonus_credits),
+        amount_usd=0.0,
+        credits_per_usd=float(plan.credits_per_usd),
+        expires_at=expires_at,
+        source="FIRST_JOIN",
+        metadata_={"seeded": True},
+    )
+    db.add(bonus_topup)
+
 @router.get("/authorize", response_model=AuthorizeResponse)
 async def authorize(
     callback_url: Annotated[str, Query(..., description="로그인 후 돌아올 콜백 URL (예: vscode://caretive.caret/auth)")],
