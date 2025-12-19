@@ -7,7 +7,7 @@ from any_llm.gateway.auth.dependencies import set_config
 from any_llm.gateway.config import GatewayConfig
 from any_llm.gateway.db import get_db, init_db
 from any_llm.gateway.pricing_init import initialize_pricing_from_config
-from any_llm.gateway.routes import auth, budgets, chat, health, keys, pricing, profile, users
+from any_llm.gateway.routes import auth, budgets, chat, health, image, keys, pricing, profile, users
 
 
 def create_app(config: GatewayConfig) -> FastAPI:
@@ -52,6 +52,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
     app.include_router(pricing.router)
     app.include_router(profile.router)
     app.include_router(health.router)
+    app.include_router(image.router)
 
     @app.get("/", include_in_schema=False)
     async def redirect_to_docs() -> RedirectResponse:
