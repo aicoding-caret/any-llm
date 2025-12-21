@@ -264,7 +264,7 @@ async def generate_image(
     try:
         client = genai.Client(api_key=api_key)
         aspect_ratio = request.aspect_ratio or "16:9"
-        image_size = request.image_size or "4K"
+        image_size = request.image_size or "1K"
         image_config = genai.types.ImageConfig(
             aspect_ratio=aspect_ratio,
             image_size=image_size,
