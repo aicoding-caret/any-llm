@@ -54,6 +54,14 @@ class GatewayConfig(BaseSettings):
         default="http://localhost:4001",
         description="Base URL used to build authorization redirect links (e.g., frontend origin)",
     )
+    image_dump_enabled: bool = Field(
+        default=False,
+        description="Whether to dump uploaded chat images to disk for debugging",
+    )
+    image_dump_dir: str | None = Field(
+        default=None,
+        description="Directory to store dumped chat images when image_dump_enabled is true",
+    )
 
 
 def load_config(config_path: str | None = None) -> GatewayConfig:

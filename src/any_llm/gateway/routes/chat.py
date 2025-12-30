@@ -46,7 +46,6 @@ class ChatCompletionRequest(BaseModel):
     response_format: dict[str, Any] | None = None
 
 
-_IMAGE_DUMP_DIR_ENV = "CARET_IMAGE_DUMP_DIR"
 _IMAGE_EXTENSION_BY_MIME = {
     "image/jpeg": "jpg",
     "image/jpg": "jpg",
@@ -72,9 +71,12 @@ def _image_extension(mime_type: str) -> str:
     return "bin"
 
 
-def _get_image_dump_dir() -> Path | None:
-    directory = os.getenv(_IMAGE_DUMP_DIR_ENV)
+def _get_image_dump_dir(config: GatewayConfig) -> Path | None:
+    if not config.image_dump_enabled:
+        return None
+    directory = config.image_dump_dir
     if not directory:
+        logger.warning("image_dump_enabled is true but image_dump_dir is not configured")
         return None
     path = Path(directory).expanduser()
     try:
@@ -123,10 +125,11 @@ def _normalize_data_url(value: str) -> tuple[str, str, bytes]:
 def _normalize_images_in_messages(
     messages: list[dict[str, Any]],
     request_id: str,
+    config: GatewayConfig,
 ) -> tuple[list[dict[str, Any]], int]:
     normalized_messages: list[dict[str, Any]] = []
     image_count = 0
-    dump_dir = _get_image_dump_dir()
+    dump_dir = _get_image_dump_dir(config)
 
     for message in messages:
         normalized_message = dict(message)
@@ -384,7 +387,7 @@ async def chat_completions(
     credentials = _get_provider_credentials(config, provider)
 
     dump_request_id = f"chat_{uuid.uuid4().hex}"
-    normalized_messages, image_count = _normalize_images_in_messages(request.messages, dump_request_id)
+    normalized_messages, image_count = _normalize_images_in_messages(request.messages, dump_request_id, config)
     completion_kwargs = request.model_dump()
     completion_kwargs["messages"] = normalized_messages
     completion_kwargs.update(credentials)
