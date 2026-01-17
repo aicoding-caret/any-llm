@@ -37,21 +37,19 @@ def get_config() -> GatewayConfig:
 
 def _extract_bearer_token(auth_header: str | None) -> str:
     """Extract and validate Bearer token from request header."""
-    x_anyllm_key = auth_header
-
-    if not x_anyllm_key:
+    if not auth_header:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Missing {API_KEY_HEADER} header",
+            detail=f"Missing {API_KEY_HEADER} or Authorization header",
         )
 
-    if not x_anyllm_key.startswith("Bearer "):
+    if not auth_header.startswith("Bearer "):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid {API_KEY_HEADER} header format. Expected 'Bearer <token>'",
+            detail="Invalid header format. Expected 'Bearer <token>'",
         )
 
-    return x_anyllm_key[7:]
+    return auth_header[7:]
 
 
 def _verify_and_update_api_key(db: Session, token: str) -> APIKey:

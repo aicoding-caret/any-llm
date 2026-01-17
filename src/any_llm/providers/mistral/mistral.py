@@ -58,7 +58,7 @@ class MistralProvider(AnyLLM):
         """Convert CompletionParams to kwargs for Mistral API."""
         # Mistral does not support providing reasoning effort
         converted_params = params.model_dump(
-            exclude_none=True, exclude={"model_id", "messages", "response_format", "stream"}
+            exclude_none=True, exclude={"model_id", "messages", "response_format", "stream", "user"}
         )
         converted_params["messages"] = _patch_messages(params.messages)
 
@@ -68,7 +68,7 @@ class MistralProvider(AnyLLM):
             elif isinstance(params.response_format, dict):
                 converted_params["response_format"] = ResponseFormat.model_validate(params.response_format)
 
-        if converted_params.get("reasoning_effort") == "auto":
+        if converted_params.get("reasoning_effort") in ("auto", "none"):
             converted_params.pop("reasoning_effort")
 
         converted_params.update(kwargs)

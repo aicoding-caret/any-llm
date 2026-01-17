@@ -23,7 +23,7 @@ jobs:
     steps:
       - name: Set expected providers for integration tests
         id: set_providers
-        run: echo "expected_providers=anthropic,bedrock,cerebras,cohere,deepseek,fireworks,gemini,groq,huggingface,inception,llama,mistral,moonshot,nebius,openai,openrouter,perplexity,portkey,together,sambanova,voyage,xai,zai,minimax" >> $GITHUB_OUTPUT
+        run: echo "expected_providers=anthropic,azureopenai,bedrock,cerebras,cohere,deepseek,fireworks,gemini,groq,huggingface,inception,llama,mistral,moonshot,nebius,openai,openrouter,perplexity,portkey,together,sambanova,voyage,xai,zai,minimax" >> $GITHUB_OUTPUT
 
       - name: Set expected providers for local integration tests
         id: set_local_providers
@@ -36,7 +36,7 @@ jobs:
       should_run_integration: ${{ steps.determine.outputs.should_run_integration }}
       should_run_local: ${{ steps.determine.outputs.should_run_local }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - name: Determine which jobs should run based on filter
         id: determine
@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - uses: astral-sh/setup-uv@v7
         with:
@@ -74,6 +74,7 @@ jobs:
           # When you add a new key, also add the provider name to the EXPECTED_PROVIDERS environment variable
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           AWS_BEARER_TOKEN_BEDROCK: ${{ secrets.AWS_BEARER_TOKEN_BEDROCK }}
+          AZURE_OPENAI_API_KEY: ${{ secrets.AZURE_OPENAI_API_KEY }}
           CEREBRAS_API_KEY: ${{ secrets.CEREBRAS_API_KEY }}
           COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
@@ -118,7 +119,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
 
       - uses: astral-sh/setup-uv@v7
         with:
@@ -129,7 +130,7 @@ jobs:
         run: |
           uv sync --group tests --extra all
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         if: github.event.inputs.filter == '' || contains(github.event.inputs.filter, 'ollama')
         with:
           path: ~/.ollama
@@ -137,7 +138,7 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-ollama-models-
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v5
         with:
           path: ~/.llamafile
           key: ${{ runner.os }}-llamafile-${{ hashFiles('tests/conftest.py') }}
@@ -146,7 +147,7 @@ jobs:
 
       - name: Setup Ollama
         if: github.event.inputs.filter == '' || contains(github.event.inputs.filter, 'ollama')
-        uses: ai-action/setup-ollama@v1
+        uses: ai-action/setup-ollama@v2
 
       - name: Run ollama
         if: github.event.inputs.filter == '' || contains(github.event.inputs.filter, 'ollama')
@@ -154,7 +155,7 @@ jobs:
           ollama serve &
           ollama pull llama3.2:1b
           ollama pull qwen3:0.6b
-          ollama pull qwen3-vl:2b
+          ollama pull llava-phi3
 
       - name: Wait for Ollama to be ready
         if: github.event.inputs.filter == '' || contains(github.event.inputs.filter, 'ollama')

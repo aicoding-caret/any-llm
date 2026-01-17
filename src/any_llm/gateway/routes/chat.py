@@ -179,24 +179,21 @@ def _normalize_images_in_messages(
     return normalized_messages, image_count
 
 
-def _get_provider_credentials(
+def _get_provider_kwargs(
     config: GatewayConfig,
     provider: LLMProvider,
 ) -> dict[str, Any]:
-    """Get provider credentials from config.
+    """Get provider kwargs from config for acompletion calls.
 
     Args:
         config: Gateway configuration
         provider: Provider name
 
     Returns:
-        Dictionary of provider credentials
-
-    Raises:
-        HTTPException: If credentials not found
+        Dictionary of provider kwargs (credentials, client_args, etc.)
 
     """
-    credentials: dict[str, Any] = {}
+    kwargs: dict[str, Any] = {}
     if provider.value in config.providers:
         provider_config = config.providers[provider.value]
 
@@ -210,10 +207,14 @@ def _get_provider_credentials(
                 project=vertex_project,
                 location=vertex_location,
             )
+            if "client_args" in provider_config:
+                kwargs["client_args"] = provider_config["client_args"]
         else:
-            credentials = provider_config
+            kwargs = {k: v for k, v in provider_config.items() if k != "client_args"}
+            if "client_args" in provider_config:
+                kwargs["client_args"] = provider_config["client_args"]
 
-    return credentials
+    return kwargs
 
 
 def _build_model_key(provider: str | LLMProvider | None, model: str) -> str:
@@ -384,13 +385,13 @@ async def chat_completions(
 
     provider, model = AnyLLM.split_model_provider(request.model)
     model_key, model_pricing = _get_model_pricing(db, provider, model)
-    credentials = _get_provider_credentials(config, provider)
+    provider_kwargs = _get_provider_kwargs(config, provider)
 
     dump_request_id = f"chat_{uuid.uuid4().hex}"
     normalized_messages, image_count = _normalize_images_in_messages(request.messages, dump_request_id, config)
     completion_kwargs = request.model_dump()
     completion_kwargs["messages"] = normalized_messages
-    completion_kwargs.update(credentials)
+    completion_kwargs.update(provider_kwargs)
 
     logger.info(
         "chat completion request model=%s stream=%s messages=%d images=%d",

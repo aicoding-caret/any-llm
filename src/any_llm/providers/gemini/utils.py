@@ -1,7 +1,7 @@
 import base64
 import json
 from time import time
-from typing import Any
+from typing import Any, Literal
 
 from google.genai import types
 from google.genai.pagers import Pager
@@ -10,6 +10,8 @@ from any_llm.logging import logger
 from any_llm.types.completion import (
     ChatCompletionChunk,
     ChoiceDelta,
+    ChoiceDeltaToolCall,
+    ChoiceDeltaToolCallFunction,
     ChunkChoice,
     CompletionUsage,
     CreateEmbeddingResponse,
@@ -173,14 +175,30 @@ def _convert_messages(messages: list[dict[str, Any]]) -> tuple[list[types.Conten
             formatted_messages.append(types.Content(role="user", parts=parts))
         elif message["role"] == "assistant":
             if message.get("tool_calls"):
-                tool_call = message["tool_calls"][0]
-                function_call = tool_call["function"]
+                parts = []
+                for i, tool_call in enumerate(message["tool_calls"]):
+                    function_call = tool_call["function"]
+                    args = json.loads(function_call["arguments"]) if function_call["arguments"] else {}
 
-                parts = [
-                    types.Part.from_function_call(
-                        name=function_call["name"], args=json.loads(function_call["arguments"])
+                    # Extract thought_signature if present (OpenAI compatibility format)
+                    # SDK accepts base64 string or bytes
+                    thought_signature = None
+                    if extra_content := tool_call.get("extra_content"):
+                        if google_extra := extra_content.get("google"):
+                            thought_signature = google_extra.get("thought_signature")
+
+                    # For the first function call in parallel calls, if no thought_signature is present,
+                    # use the skip validator sentinel per Google's documentation:
+                    # https://ai.google.dev/gemini-api/docs/thought-signatures#faqs
+                    if i == 0 and thought_signature is None:
+                        thought_signature = "skip_thought_signature_validator"
+
+                    parts.append(
+                        types.Part(
+                            function_call=types.FunctionCall(name=function_call["name"], args=args),
+                            thought_signature=thought_signature,
+                        )
                     )
-                ]
             else:
                 parts = [types.Part.from_text(text=message["content"])]
 
@@ -242,16 +260,23 @@ def _convert_response_to_response_dict(response: types.GenerateContentResponse) 
                     for key, value in args.items():
                         args_dict[key] = value
 
-                tool_calls_list.append(
-                    {
-                        "id": f"call_{hash(function_call.name)}_{len(tool_calls_list)}",
-                        "function": {
-                            "name": function_call.name,
-                            "arguments": json.dumps(args_dict),
-                        },
-                        "type": "function",
+                tool_call_dict: dict[str, Any] = {
+                    "id": f"call_{hash(function_call.name)}_{len(tool_calls_list)}",
+                    "function": {
+                        "name": function_call.name,
+                        "arguments": json.dumps(args_dict),
+                    },
+                    "type": "function",
+                }
+
+                # Include thought_signature if present (OpenAI compatibility format)
+                thought_signature = getattr(part, "thought_signature", None)
+                if thought_signature is not None and isinstance(thought_signature, bytes):
+                    tool_call_dict["extra_content"] = {
+                        "google": {"thought_signature": base64.b64encode(thought_signature).decode("utf-8")}
                     }
-                )
+
+                tool_calls_list.append(tool_call_dict)
             elif getattr(part, "text", None):
                 text_content = part.text
 
@@ -330,17 +355,43 @@ def _create_openai_chunk_from_google_chunk(
 
     content = ""
     reasoning_content = ""
+    tool_calls_list: list[ChoiceDeltaToolCall] = []
 
     for part in parts:
         if getattr(part, "thought", False):
             reasoning_content += part.text or ""
-        else:
-            content += part.text or ""
+        elif function_call := part.function_call:
+            args_dict = {}
+            if args := function_call.args:
+                for key, value in args.items():
+                    args_dict[key] = value
+
+            tool_calls_list.append(
+                ChoiceDeltaToolCall(
+                    index=len(tool_calls_list),
+                    id=f"call_{hash(function_call.name)}_{len(tool_calls_list)}",
+                    type="function",
+                    function=ChoiceDeltaToolCallFunction(
+                        name=function_call.name,
+                        arguments=json.dumps(args_dict),
+                    ),
+                )
+            )
+        elif part.text:
+            content += part.text
+
+    # Determine finish_reason based on what we found
+    finish_reason: Literal["stop", "length", "tool_calls", "content_filter", "function_call"] | None = None
+    if tool_calls_list:
+        finish_reason = "tool_calls"
+    elif candidate.finish_reason and candidate.finish_reason.value == "STOP":
+        finish_reason = "stop"
 
     delta = ChoiceDelta(
         content=content or None,
         role="assistant",
         reasoning=Reasoning(content=reasoning_content) if reasoning_content else None,
+        tool_calls=tool_calls_list if tool_calls_list else None,
     )
 
     finish_reason = "stop" if getattr(getattr(candidate, "finish_reason", None), "value", None) == "STOP" else None

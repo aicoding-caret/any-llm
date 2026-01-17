@@ -10,6 +10,8 @@ from any_llm.types.completion import (
     ChatCompletionMessageFunctionToolCall,
     Choice,
     ChoiceDelta,
+    ChoiceDeltaToolCall,
+    ChoiceDeltaToolCallFunction,
     ChunkChoice,
     CompletionParams,
     CompletionUsage,
@@ -40,7 +42,9 @@ def _convert_params(params: CompletionParams, kwargs: dict[str, Any]) -> dict[st
     if params.tools:
         result_kwargs["toolConfig"] = _convert_tool_spec(params.tools, params.tool_choice)
 
-    reasoning_enabled = params.reasoning_effort is not None and params.reasoning_effort != "auto"
+    reasoning_enabled = (
+        params.reasoning_effort is not None and params.reasoning_effort != "auto" and params.reasoning_effort != "none"
+    )
 
     inference_config: dict[str, Any] = {}
     if params.max_tokens:
@@ -94,26 +98,41 @@ def _convert_tool_spec(tools: list[dict[str, Any]], tool_choice: str | dict[str,
 
 
 def _convert_messages(messages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Convert messages to AWS Bedrock format."""
+    """Convert messages to AWS Bedrock format.
+
+    Bedrock requires that consecutive tool results are merged into a single user message.
+    This is necessary because Bedrock expects all toolResult blocks that correspond to
+    tool calls from a single assistant message to be grouped together.
+    """
     system_message = []
     if messages and messages[0]["role"] == "system":
         system_message = [{"text": messages[0]["content"]}]
         messages = messages[1:]
 
-    formatted_messages = []
+    formatted_messages: list[dict[str, Any]] = []
+    pending_tool_results: list[dict[str, Any]] = []
+
+    def flush_tool_results() -> None:
+        """Flush accumulated tool results into a single user message."""
+        if pending_tool_results:
+            formatted_messages.append({"role": "user", "content": pending_tool_results.copy()})
+            pending_tool_results.clear()
+
     for message in messages:
         if message["role"] == "system":
             continue
 
         if message["role"] == "tool":
-            bedrock_message = _convert_tool_result(message)
-            if bedrock_message:
-                formatted_messages.append(bedrock_message)
+            tool_result_content = _convert_tool_result_content(message)
+            if tool_result_content:
+                pending_tool_results.append(tool_result_content)
         elif message["role"] == "assistant":
+            flush_tool_results()
             bedrock_message = _convert_assistant(message)
             if bedrock_message:
                 formatted_messages.append(bedrock_message)
         else:  # user messages
+            flush_tool_results()
             formatted_messages.append(
                 {
                     "role": message["role"],
@@ -121,11 +140,18 @@ def _convert_messages(messages: list[dict[str, Any]]) -> tuple[list[dict[str, An
                 }
             )
 
+    # Flush any remaining tool results at the end
+    flush_tool_results()
+
     return system_message, formatted_messages
 
 
-def _convert_tool_result(message: dict[str, Any]) -> dict[str, Any] | None:
-    """Convert OpenAI tool result format to AWS Bedrock format."""
+def _convert_tool_result_content(message: dict[str, Any]) -> dict[str, Any] | None:
+    """Convert OpenAI tool result format to AWS Bedrock toolResult content block.
+
+    Returns just the toolResult content block, not the full message.
+    The caller is responsible for grouping these into a user message.
+    """
     if message["role"] != "tool" or "content" not in message:
         return None
 
@@ -140,10 +166,7 @@ def _convert_tool_result(message: dict[str, Any]) -> dict[str, Any] | None:
     except json.JSONDecodeError:
         content = [{"text": message["content"]}]
 
-    return {
-        "role": "user",
-        "content": [{"toolResult": {"toolUseId": tool_call_id, "content": content}}],
-    }
+    return {"toolResult": {"toolUseId": tool_call_id, "content": content}}
 
 
 def _convert_assistant(message: dict[str, Any]) -> dict[str, Any] | None:
@@ -283,27 +306,72 @@ def _convert_response(response: dict[str, Any]) -> ChatCompletion:
     )
 
 
-def _create_openai_chunk_from_aws_chunk(chunk: dict[str, Any], model: str) -> ChatCompletionChunk | None:
-    """Create an OpenAI ChatCompletionChunk from an AWS Bedrock chunk."""
+def _create_openai_chunk_from_aws_chunk(
+    chunk: dict[str, Any], model: str, tool_index_map: dict[int, int] | None = None
+) -> ChatCompletionChunk | None:
+    """Create an OpenAI ChatCompletionChunk from an AWS Bedrock chunk.
+
+    Args:
+        chunk: The AWS Bedrock streaming chunk
+        model: The model identifier
+        tool_index_map: Optional mapping from contentBlockIndex to tool call index (0-based).
+                       This should be passed in and maintained by the caller for multi-turn streaming.
+    """
+    if tool_index_map is None:
+        tool_index_map = {}
+
     content: str | None = None
     reasoning_content: str | None = None
-    finish_reason: Literal["stop", "length"] | None = None
+    finish_reason: Literal["stop", "length", "tool_calls"] | None = None
+    tool_call: ChoiceDeltaToolCall | None = None
 
     if "contentBlockStart" in chunk:
-        block = chunk["contentBlockStart"]["start"]
+        block_start = chunk["contentBlockStart"]
+        block = block_start.get("start", {})
+        block_index = block_start.get("contentBlockIndex", 0)
         if "reasoningContent" in block:
             reasoning_content = ""
+        elif "toolUse" in block:
+            tool_use = block["toolUse"]
+            tool_idx = len(tool_index_map)
+            tool_index_map[block_index] = tool_idx
+            tool_call = ChoiceDeltaToolCall(
+                index=tool_idx,
+                id=tool_use.get("toolUseId", ""),
+                type="function",
+                function=ChoiceDeltaToolCallFunction(
+                    name=tool_use.get("name", ""),
+                    arguments="",
+                ),
+            )
         else:
             content = ""
     elif "contentBlockDelta" in chunk:
-        delta = chunk["contentBlockDelta"]["delta"]
+        block_delta = chunk["contentBlockDelta"]
+        delta = block_delta.get("delta", {})
+        block_index = block_delta.get("contentBlockIndex", 0)
         if "text" in delta:
             content = delta["text"]
         elif "reasoningContent" in delta:
             reasoning_content = delta["reasoningContent"].get("text", "")
+        elif "toolUse" in delta:
+            tool_use = delta["toolUse"]
+            tool_idx = tool_index_map.get(block_index, 0)
+            tool_call = ChoiceDeltaToolCall(
+                index=tool_idx,
+                id="",
+                type="function",
+                function=ChoiceDeltaToolCallFunction(
+                    name="",
+                    arguments=tool_use.get("input", ""),
+                ),
+            )
     elif "messageStop" in chunk:
-        if chunk["messageStop"]["stopReason"] == "max_tokens":
+        stop_reason = chunk["messageStop"]["stopReason"]
+        if stop_reason == "max_tokens":
             finish_reason = "length"
+        elif stop_reason == "tool_use":
+            finish_reason = "tool_calls"
         else:
             finish_reason = "stop"
     elif "messageStart" in chunk:
@@ -318,6 +386,9 @@ def _create_openai_chunk_from_aws_chunk(chunk: dict[str, Any], model: str) -> Ch
         delta_dict["reasoning"] = {"content": reasoning_content}
 
     delta = ChoiceDelta(**delta_dict)
+    if tool_call is not None:
+        delta.tool_calls = [tool_call]
+
     choice = ChunkChoice(delta=delta, finish_reason=finish_reason, index=0)
     return ChatCompletionChunk(
         id=f"chatcmpl-{time()}",  # AWS doesn't provide an ID in the chunk

@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=48", "setuptools_scm[toml]>=6.3.1"]
+requires = ["setuptools>=48"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,7 +7,7 @@ name = "any-llm-sdk"
 readme = "README.md"
 license = {text = "Apache-2.0"}
 requires-python = ">=3.11"
-dynamic = ["version"]
+version = "0.0.0-dev" # There is a regex in the release.yaml file that looks for this version string to set the version in the pyproject.toml file. Do not change this version string without updating the regex.
 dependencies = [
   "pydantic>2,<3",
   "openai>=1.99.3",
@@ -19,14 +19,11 @@ dependencies = [
 [project.optional-dependencies]
 
 all = [
-  "any-llm-sdk[mistral,anthropic,huggingface,gemini,vertexai,cohere,cerebras,fireworks,groq,bedrock,azure,azureopenai,watsonx,together,sambanova,ollama,moonshot,nebius,xai,databricks,deepseek,inception,openai,openrouter,portkey,lmstudio,llama,voyage,perplexity,platform,llamafile,llamacpp,sagemaker,gateway,zai,minimax]"
+  "any-llm-sdk[mistral,anthropic,huggingface,gemini,vertexai,cohere,cerebras,fireworks,groq,bedrock,azure,azureopenai,watsonx,together,sambanova,ollama,moonshot,nebius,xai,databricks,deepseek,inception,openai,openrouter,portkey,lmstudio,llama,voyage,perplexity,platform,llamafile,llamacpp,sagemaker,gateway,zai,minimax,vllm]"
 ]
 
 platform = [
-  "typing-extensions",
-  "bcrypt>=5.0.0",
-  "cryptography>=46.0.3",
-  "pynacl>=1.6.0",
+  "any-llm-platform-client>=0.2.0",
 ]
 
 perplexity = []
@@ -76,7 +73,7 @@ watsonx = [
 ]
 
 together = [
-  "together",
+  "together>=2.0.0a1",
 ]
 
 ollama = [
@@ -113,6 +110,7 @@ openrouter = []
 portkey = []
 sambanova = []
 minimax = []
+vllm = []
 gateway = [
   "fastapi>=0.115.0",
   "uvicorn[standard]>=0.30.0",
@@ -143,9 +141,6 @@ Source = "https://github.com/mozilla-ai/any-llm"
 exclude = ["tests", "tests.*"]
 where = ["src"]
 namespaces = false
-
-[tool.setuptools_scm]
-write_to = "src/any_llm/_version.py"
 
 [tool.pylint.messages_control]
 disable = [
@@ -255,7 +250,7 @@ docs = [
 
 
 lint = [
-  "pre-commit==4.4.0",
+  "pre-commit==4.5.1",
   "pre-commit-uv==4.2.0",
   "mypy",
   "types-aiofiles",
@@ -263,7 +258,7 @@ lint = [
 ]
 
 tests = [
-  "pytest>=8,<9",
+  "pytest>=8,<10",
   "pytest-cov>=6.2.1,<7",
   "pytest-asyncio>=0.26.0",
   "mktestdocs>=0.2.4",

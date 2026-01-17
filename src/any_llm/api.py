@@ -1,12 +1,18 @@
 from collections.abc import AsyncIterator, Callable, Iterator, Sequence
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel
 
 from any_llm import AnyLLM
 from any_llm.constants import LLMProvider
 from any_llm.types.batch import Batch
-from any_llm.types.completion import ChatCompletion, ChatCompletionChunk, ChatCompletionMessage, CreateEmbeddingResponse
+from any_llm.types.completion import (
+    ChatCompletion,
+    ChatCompletionChunk,
+    ChatCompletionMessage,
+    CreateEmbeddingResponse,
+    ReasoningEffort,
+)
 from any_llm.types.model import Model
 from any_llm.types.responses import Response, ResponseInputParam, ResponseStreamEvent
 from any_llm.utils.decorators import BATCH_API_EXPERIMENTAL_MESSAGE, experimental
@@ -38,7 +44,7 @@ def completion(
     logit_bias: dict[str, float] | None = None,
     stream_options: dict[str, Any] | None = None,
     max_completion_tokens: int | None = None,
-    reasoning_effort: Literal["minimal", "low", "medium", "high", "auto"] | None = "auto",
+    reasoning_effort: ReasoningEffort | None = "auto",
     client_args: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> ChatCompletion | Iterator[ChatCompletionChunk]:
@@ -80,25 +86,43 @@ def completion(
         The completion response from the provider
 
     """
-    all_args = locals()
-    all_args.pop("provider")
-    kwargs = all_args.pop("kwargs")
-
-    model = all_args.pop("model")
     if provider is None:
         provider_key, model_id = AnyLLM.split_model_provider(model)
     else:
         provider_key = LLMProvider.from_string(provider)
         model_id = model
-    all_args["model"] = model_id
 
     llm = AnyLLM.create(
         provider_key,
-        api_key=all_args.pop("api_key"),
-        api_base=all_args.pop("api_base"),
-        **all_args.pop("client_args") or {},
+        api_key=api_key,
+        api_base=api_base,
+        **client_args or {},
     )
-    return llm.completion(**all_args, **kwargs)
+    return llm.completion(
+        model=model_id,
+        messages=messages,
+        tools=tools,
+        tool_choice=tool_choice,
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+        response_format=response_format,
+        stream=stream,
+        n=n,
+        stop=stop,
+        presence_penalty=presence_penalty,
+        frequency_penalty=frequency_penalty,
+        seed=seed,
+        user=user,
+        parallel_tool_calls=parallel_tool_calls,
+        logprobs=logprobs,
+        top_logprobs=top_logprobs,
+        logit_bias=logit_bias,
+        stream_options=stream_options,
+        max_completion_tokens=max_completion_tokens,
+        reasoning_effort=reasoning_effort,
+        **kwargs,
+    )
 
 
 async def acompletion(
@@ -127,7 +151,7 @@ async def acompletion(
     logit_bias: dict[str, float] | None = None,
     stream_options: dict[str, Any] | None = None,
     max_completion_tokens: int | None = None,
-    reasoning_effort: Literal["minimal", "low", "medium", "high", "auto"] | None = "auto",
+    reasoning_effort: ReasoningEffort | None = "auto",
     client_args: dict[str, Any] | None = None,
     **kwargs: Any,
 ) -> ChatCompletion | AsyncIterator[ChatCompletionChunk]:
@@ -169,25 +193,43 @@ async def acompletion(
         The completion response from the provider
 
     """
-    all_args = locals()
-    all_args.pop("provider")
-    kwargs = all_args.pop("kwargs")
-
-    model = all_args.pop("model")
     if provider is None:
         provider_key, model_id = AnyLLM.split_model_provider(model)
     else:
         provider_key = LLMProvider.from_string(provider)
         model_id = model
-    all_args["model"] = model_id
 
     llm = AnyLLM.create(
         provider_key,
-        api_key=all_args.pop("api_key"),
-        api_base=all_args.pop("api_base"),
-        **all_args.pop("client_args") or {},
+        api_key=api_key,
+        api_base=api_base,
+        **client_args or {},
     )
-    return await llm.acompletion(**all_args, **kwargs)
+    return await llm.acompletion(
+        model=model_id,
+        messages=messages,
+        tools=tools,
+        tool_choice=tool_choice,
+        temperature=temperature,
+        top_p=top_p,
+        max_tokens=max_tokens,
+        response_format=response_format,
+        stream=stream,
+        n=n,
+        stop=stop,
+        presence_penalty=presence_penalty,
+        frequency_penalty=frequency_penalty,
+        seed=seed,
+        user=user,
+        parallel_tool_calls=parallel_tool_calls,
+        logprobs=logprobs,
+        top_logprobs=top_logprobs,
+        logit_bias=logit_bias,
+        stream_options=stream_options,
+        max_completion_tokens=max_completion_tokens,
+        reasoning_effort=reasoning_effort,
+        **kwargs,
+    )
 
 
 def responses(
@@ -247,25 +289,34 @@ def responses(
         NotImplementedError: If the selected provider does not support the Responses API.
 
     """
-    all_args = locals()
-    all_args.pop("provider")
-    kwargs = all_args.pop("kwargs")
-
-    model = all_args.pop("model")
     if provider is None:
         provider_key, model_id = AnyLLM.split_model_provider(model)
     else:
         provider_key = LLMProvider.from_string(provider)
         model_id = model
-    all_args["model"] = model_id
 
     llm = AnyLLM.create(
         provider_key,
-        api_key=all_args.pop("api_key"),
-        api_base=all_args.pop("api_base"),
-        **all_args.pop("client_args") or {},
+        api_key=api_key,
+        api_base=api_base,
+        **client_args or {},
     )
-    return llm.responses(**all_args, **kwargs)
+    return llm.responses(
+        model=model_id,
+        input_data=input_data,
+        tools=tools,
+        tool_choice=tool_choice,
+        max_output_tokens=max_output_tokens,
+        temperature=temperature,
+        top_p=top_p,
+        stream=stream,
+        instructions=instructions,
+        max_tool_calls=max_tool_calls,
+        parallel_tool_calls=parallel_tool_calls,
+        reasoning=reasoning,
+        text=text,
+        **kwargs,
+    )
 
 
 async def aresponses(
@@ -325,25 +376,34 @@ async def aresponses(
         NotImplementedError: If the selected provider does not support the Responses API.
 
     """
-    all_args = locals()
-    all_args.pop("provider")
-    kwargs = all_args.pop("kwargs")
-
-    model = all_args.pop("model")
     if provider is None:
         provider_key, model_id = AnyLLM.split_model_provider(model)
     else:
         provider_key = LLMProvider.from_string(provider)
         model_id = model
-    all_args["model"] = model_id
 
     llm = AnyLLM.create(
         provider_key,
-        api_key=all_args.pop("api_key"),
-        api_base=all_args.pop("api_base"),
-        **all_args.pop("client_args") or {},
+        api_key=api_key,
+        api_base=api_base,
+        **client_args or {},
     )
-    return await llm.aresponses(**all_args, **kwargs)
+    return await llm.aresponses(
+        model=model_id,
+        input_data=input_data,
+        tools=tools,
+        tool_choice=tool_choice,
+        max_output_tokens=max_output_tokens,
+        temperature=temperature,
+        top_p=top_p,
+        stream=stream,
+        instructions=instructions,
+        max_tool_calls=max_tool_calls,
+        parallel_tool_calls=parallel_tool_calls,
+        reasoning=reasoning,
+        text=text,
+        **kwargs,
+    )
 
 
 def embedding(

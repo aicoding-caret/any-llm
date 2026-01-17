@@ -40,8 +40,18 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator, Sequence
 
     from google import genai
+    from openai.types.chat.chat_completion_message_custom_tool_call import (
+        ChatCompletionMessageCustomToolCall,
+    )
+    from openai.types.chat.chat_completion_message_function_tool_call import (
+        ChatCompletionMessageFunctionToolCall as OpenAIChatCompletionMessageFunctionToolCall,
+    )
 
     from any_llm.types.model import Model
+
+    ChatCompletionMessageToolCallType = (
+        OpenAIChatCompletionMessageFunctionToolCall | ChatCompletionMessageCustomToolCall
+    )
 
 REASONING_EFFORT_TO_THINKING_BUDGETS = {"minimal": 256, "low": 1024, "medium": 8192, "high": 24576}
 
@@ -84,7 +94,7 @@ class GoogleProvider(AnyLLM):
         if params.presence_penalty is not None:
             kwargs["presence_penalty"] = params.presence_penalty
         if params.reasoning_effort != "auto":
-            if params.reasoning_effort is None:
+            if params.reasoning_effort is None or params.reasoning_effort == "none":
                 kwargs["thinking_config"] = types.ThinkingConfig(include_thoughts=False)
             else:
                 kwargs["thinking_config"] = types.ThinkingConfig(
@@ -143,6 +153,7 @@ class GoogleProvider(AnyLLM):
                                 name=tc["function"]["name"],
                                 arguments=tc["function"]["arguments"],
                             ),
+                            extra_content=tc.get("extra_content"),
                         )
                     )
                 tool_calls = tool_calls_list
@@ -151,7 +162,7 @@ class GoogleProvider(AnyLLM):
             message = ChatCompletionMessage(
                 role="assistant",
                 content=message_dict.get("content"),
-                tool_calls=tool_calls,
+                tool_calls=cast("list[ChatCompletionMessageToolCallType] | None", tool_calls),
                 reasoning=Reasoning(content=reasoning_content) if reasoning_content else None,
             )
             from typing import Literal
