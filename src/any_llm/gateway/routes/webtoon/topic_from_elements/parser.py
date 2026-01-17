@@ -8,9 +8,23 @@ from .schema import GenerateTopicFromElementsResponse, Language, SceneElements
 
 
 def clean_text(text: str) -> str:
-    cleaned = re.sub(r"^```[a-zA-Z]*\s*", "", text)
-    cleaned = re.sub(r"```$", "", cleaned)
+    """Remove markdown code blocks and extract clean content."""
+    cleaned = text.strip()
+    # Remove ```json ... ``` or ``` ... ``` blocks (multiline)
+    cleaned = re.sub(r"^```[a-zA-Z]*\n?", "", cleaned)
+    cleaned = re.sub(r"\n?```$", "", cleaned)
+    # Also handle inline code blocks
+    cleaned = re.sub(r"^`+|`+$", "", cleaned)
     return cleaned.strip()
+
+
+def extract_json_from_text(text: str) -> str | None:
+    """Extract JSON object from text that may contain extra content."""
+    # Try to find JSON object pattern
+    match = re.search(r'\{[^{}]*"topic"\s*:\s*"[^"]*"[^{}]*\}', text, re.DOTALL)
+    if match:
+        return match.group(0)
+    return None
 
 
 def extract_text_from_response(response: Any) -> str | None:
@@ -34,18 +48,46 @@ def extract_text_from_response(response: Any) -> str | None:
 
 
 def parse_topic_text(text: str) -> str | None:
+    """Parse topic from LLM response, handling various formats."""
+    if not text:
+        return None
+
     cleaned = clean_text(text)
     if not cleaned:
         return None
+
+    # Try direct JSON parse first
     try:
         parsed = json.loads(cleaned)
-    except (TypeError, ValueError):
-        return cleaned.strip() or None
-    if not isinstance(parsed, dict):
-        return None
-    topic_value = parsed.get("topic")
-    if isinstance(topic_value, str) and topic_value.strip():
-        return topic_value.strip()
+        if isinstance(parsed, dict):
+            topic_value = parsed.get("topic")
+            if isinstance(topic_value, str) and topic_value.strip():
+                return topic_value.strip()
+    except (TypeError, ValueError, json.JSONDecodeError):
+        pass
+
+    # Try to extract JSON from mixed content
+    json_str = extract_json_from_text(cleaned)
+    if json_str:
+        try:
+            parsed = json.loads(json_str)
+            if isinstance(parsed, dict):
+                topic_value = parsed.get("topic")
+                if isinstance(topic_value, str) and topic_value.strip():
+                    return topic_value.strip()
+        except (TypeError, ValueError, json.JSONDecodeError):
+            pass
+
+    # Try regex extraction for escaped quotes or malformed JSON
+    match = re.search(r'"topic"\s*:\s*"((?:[^"\\]|\\.)*)"', cleaned)
+    if match:
+        topic_value = match.group(1)
+        # Unescape common escapes
+        topic_value = topic_value.replace('\\"', '"').replace('\\n', '\n')
+        if topic_value.strip():
+            return topic_value.strip()
+
+    # If all parsing fails, return None (let caller use fallback)
     return None
 
 

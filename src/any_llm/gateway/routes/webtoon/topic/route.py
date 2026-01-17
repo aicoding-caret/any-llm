@@ -53,7 +53,8 @@ async def generate_topic(
     era_label = resolve_era_label(request.era)
     season_label = resolve_season_label(request.season)
     character_count = request.characterCount
-    prompt = build_prompt(genre_prompt, language_label, era_label, season_label, character_count)
+    panel_count = request.panelCount
+    prompt = build_prompt(genre_prompt, language_label, era_label, season_label, character_count, panel_count)
 
     model_input = request.model or DEFAULT_MODEL
     provider_name = "gemini"
@@ -63,19 +64,21 @@ async def generate_topic(
 
     try:
         logger.info(
-            "webtoon.topic request model=%s genre=%s language=%s era=%s season=%s characterCount=%s",
+            "webtoon.topic request model=%s genre=%s language=%s era=%s season=%s characterCount=%s panelCount=%s",
             model_input,
             request.genre,
             resolved_language,
             request.era,
             request.season,
             character_count,
+            panel_count,
         )
         response = generate_text_content(
             client,
             model_input,
-            build_system_prompt(language_label, character_count),
+            build_system_prompt(language_label, character_count, panel_count),
             prompt,
+            temperature=0.9,  # Higher temperature for creative diversity
         )
 
         usage_info = getattr(response, "usage_metadata", None) or getattr(response, "usage", None)

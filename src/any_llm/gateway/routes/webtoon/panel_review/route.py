@@ -82,7 +82,18 @@ async def review_panel(
     client = create_genai_client(config)
 
     try:
-        logger.info("webtoon.review-panel request panel=%s", request.panelNumber)
+        logger.info(
+            "webtoon.review-panel request panel=%s topic=%s genre=%s style=%s era=%s season=%s speaker=%s scene=%s metadata=%s",
+            request.panelNumber,
+            request.topic,
+            request.genre,
+            request.style,
+            request.era,
+            request.season,
+            request.speaker,
+            request.scene,
+            request.metadata,
+        )
         response = generate_text_content(
             client,
             model_input,

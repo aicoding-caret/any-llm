@@ -5,6 +5,11 @@ from typing import Literal, Sequence
 from pydantic import BaseModel
 
 Language = Literal["ko", "zh", "ja"]
+CharacterCount = Literal["solo", "duo", "group"]
+PanelCount = Literal[1, 3, 4, 6]
+
+DEFAULT_PANEL_COUNT: PanelCount = 4
+DEFAULT_CHARACTER_COUNT: CharacterCount = "duo"
 
 ERA_IDS = ["any", "modern", "nineties", "seventies-eighties", "joseon", "future"]
 SEASON_IDS = ["any", "spring", "summer", "autumn", "winter"]
@@ -49,6 +54,8 @@ class GenerateScriptRequest(BaseModel):
     season: str | None = None
     characterGenerationMode: Literal["ai", "caricature"] | None = "ai"
     language: Language | None = None
+    panelCount: PanelCount | None = None
+    characterCount: CharacterCount | None = None
 
 
 class GenerateScriptResponse(BaseModel):

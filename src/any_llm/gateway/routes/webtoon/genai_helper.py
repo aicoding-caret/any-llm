@@ -52,7 +52,10 @@ def get_response_text(response: Any) -> str | None:
     return extract_text_from_candidate(candidates[0])
 
 
-def build_text_content_config(system_instruction: str | None = None) -> Any:
+def build_text_content_config(
+    system_instruction: str | None = None,
+    temperature: float | None = None,
+) -> Any:
     """Build GenerateContentConfig for text-only responses."""
     assert genai is not None
     config_kwargs: dict[str, Any] = {
@@ -61,6 +64,8 @@ def build_text_content_config(system_instruction: str | None = None) -> Any:
     }
     if system_instruction:
         config_kwargs["system_instruction"] = system_instruction
+    if temperature is not None:
+        config_kwargs["temperature"] = temperature
     return genai.types.GenerateContentConfig(**config_kwargs)
 
 
@@ -75,11 +80,13 @@ def generate_text_content(
     model: str,
     system_prompt: str | None,
     user_prompt: str,
+    temperature: float | None = None,
 ) -> Any:
     """Generate text content using genai client."""
     assert genai is not None
-    content_config = build_text_content_config(system_prompt)
+    content_config = build_text_content_config(system_prompt, temperature)
     contents = build_user_contents(user_prompt)
+    logger.info("generate_text_content: model=%s, temperature=%s", model, temperature)
     return client.models.generate_content(
         model=model,
         contents=contents,

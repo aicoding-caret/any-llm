@@ -81,7 +81,21 @@ async def refine_panel_script(
     client = create_genai_client(config)
 
     try:
-        logger.info("webtoon.refine-panel-script request panel=%s", request.panelNumber)
+        logger.info(
+            "webtoon.refine-panel-script request panel=%s topic=%s genre=%s style=%s era=%s season=%s speaker=%s scene=%s dialogue=%s improvement=%s revisionPrompt=%s nextHint=%s",
+            request.panelNumber,
+            request.topic,
+            request.genre,
+            request.style,
+            request.era,
+            request.season,
+            request.speaker,
+            request.scene,
+            request.dialogue,
+            request.improvement,
+            request.revisionPrompt,
+            request.nextHint,
+        )
         response = generate_text_content(
             client,
             model_input,

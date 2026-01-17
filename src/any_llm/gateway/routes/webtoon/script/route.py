@@ -65,6 +65,8 @@ async def generate_script(
     era_label = resolve_era_label(request.era)
     season_label = resolve_season_label(request.season)
     world_setting_block = build_world_setting_block(era_label, season_label)
+    panel_count = request.panelCount
+    character_count = request.characterCount
     user_prompt = build_user_prompt(
         topic=request.topic,
         style=request.style,
@@ -76,6 +78,8 @@ async def generate_script(
         caricature_mode=(request.characterGenerationMode or "ai") == "caricature",
         world_setting=world_setting_block,
         style_prompt=style_prompt,
+        panel_count=panel_count,
+        character_count=character_count,
     )
 
     model_input = DEFAULT_MODEL
@@ -86,18 +90,22 @@ async def generate_script(
 
     try:
         logger.info(
-            "webtoon.script request genre=%s style=%s language=%s era=%s season=%s mode=%s",
+            "webtoon.script request topic=%s genre=%s style=%s language=%s era=%s season=%s mode=%s panelCount=%s characterCount=%s topicElements=%s",
+            request.topic,
             request.genre,
             request.style,
             resolved_language,
             request.era,
             request.season,
             request.characterGenerationMode,
+            panel_count,
+            character_count,
+            request.topicElements,
         )
         response = generate_text_content(
             client,
             model_input,
-            build_system_prompt(resolved_language, style_prompt),
+            build_system_prompt(resolved_language, style_prompt, panel_count, character_count),
             user_prompt,
         )
 

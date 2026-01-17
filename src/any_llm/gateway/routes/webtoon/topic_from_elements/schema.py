@@ -6,6 +6,8 @@ from pydantic import BaseModel
 
 Language = Literal["ko", "zh", "ja"]
 CharacterCount = Literal["solo", "duo", "group"]
+PanelCount = Literal[1, 3, 4, 6]
+DEFAULT_PANEL_COUNT: PanelCount = 4
 
 
 class SceneElements(BaseModel):
@@ -24,6 +26,7 @@ class GenerateTopicFromElementsRequest(BaseModel):
     era: str | None = None
     season: str | None = None
     characterCount: CharacterCount | None = None
+    panelCount: PanelCount | None = None
 
 
 class GenerateTopicFromElementsResponse(BaseModel):

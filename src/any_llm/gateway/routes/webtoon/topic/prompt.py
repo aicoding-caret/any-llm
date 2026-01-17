@@ -28,12 +28,37 @@ CHARACTER_COUNT_GUIDANCE: dict[str, dict[str, str]] = {
     },
 }
 
+PANEL_COUNT_GUIDANCE: dict[int, dict[str, str]] = {
+    1: {
+        "structure": "single impactful scene",
+        "description": "Create a single powerful visual that conveys the entire message or emotion at once.",
+        "flow": "One dramatic moment",
+    },
+    3: {
+        "structure": "setup → development → punchline/twist",
+        "description": "Build tension across 3 panels leading to a surprising or funny conclusion.",
+        "flow": "Introduction → Build-up → Payoff",
+    },
+    4: {
+        "structure": "setup → development → climax → resolution",
+        "description": "Classic 4-panel structure with clear narrative progression.",
+        "flow": "기 (Introduction) → 승 (Development) → 전 (Climax) → 결 (Resolution)",
+    },
+    6: {
+        "structure": "extended narrative with emotional depth",
+        "description": "Allows for deeper character development and more complex storytelling.",
+        "flow": "Hook → Setup → Rising action → Climax → Falling action → Resolution",
+    },
+}
+
 SYSTEM_PROMPT_BASE = (
-    "You are a 4-panel webtoon planner.\n"
+    "You are a {panel_count}-panel webtoon planner.\n"
     "You are tasked with suggesting high-potential topics aligned with the selected genre.\n\n"
+    "Panel Structure: {panel_structure}\n"
+    "{panel_flow}\n\n"
     "Common rules:\n"
     "1. The output must be valid JSON only.\n"
-    "2. Each topic must be executable as a four-panel structure.\n"
+    "2. Each topic must be executable as a {panel_count}-panel structure.\n"
     "3. Avoid vague or overly abstract prompts.\n"
     "4. Describe situations vividly so each panel is easily imagined.\n"
     "5. Mix approaches (empathy, twist, message, explanation) across the candidates.\n"
@@ -45,8 +70,11 @@ SYSTEM_PROMPT_BASE = (
     "{character_count_rule}"
 )
 
-# Keep for backward compatibility
+# Keep for backward compatibility (4-panel default)
 SYSTEM_PROMPT_TEMPLATE = SYSTEM_PROMPT_BASE.format(
+    panel_count=4,
+    panel_structure=PANEL_COUNT_GUIDANCE[4]["structure"],
+    panel_flow=f"Flow: {PANEL_COUNT_GUIDANCE[4]['flow']}",
     language_label="{language_label}",
     character_count_rule=(
         "11. IMPORTANT: Each topic MUST feature at least 2 characters interacting with each other.\n"
@@ -54,6 +82,13 @@ SYSTEM_PROMPT_TEMPLATE = SYSTEM_PROMPT_BASE.format(
         "13. The subject field should include multiple characters (e.g., 'A and B', 'friends', 'couple', 'coworkers')."
     ),
 )
+
+
+def resolve_panel_count_guidance(panel_count: PanelCount | None) -> dict[str, str]:
+    """Return guidance for the given panel count setting."""
+    if panel_count and panel_count in PANEL_COUNT_GUIDANCE:
+        return PANEL_COUNT_GUIDANCE[panel_count]
+    return PANEL_COUNT_GUIDANCE[DEFAULT_PANEL_COUNT]
 
 GENRE_TEMPLATES: dict[str, dict[str, str]] = {
     "daily": {
@@ -225,11 +260,15 @@ def build_prompt(
     era_label: str | None,
     season_label: str | None,
     character_count: CharacterCount | None = None,
+    panel_count: PanelCount | None = None,
 ) -> str:
     world_setting_block = build_world_setting_block(era_label, season_label)
     guidance = resolve_character_count_guidance(character_count)
+    panel_guidance = resolve_panel_count_guidance(panel_count)
+    resolved_panel_count = panel_count or DEFAULT_PANEL_COUNT
     prompt_lines = [
         f"Genre: {genre_prompt['title']}",
+        f"Panel Count: {resolved_panel_count} panels ({panel_guidance['structure']})",
         "",
         "Guidelines:",
         genre_prompt["criteria"],
@@ -295,9 +334,18 @@ def build_character_count_rules(character_count: CharacterCount | None) -> str:
     )
 
 
-def build_system_prompt(language_label: str, character_count: CharacterCount | None = None) -> str:
+def build_system_prompt(
+    language_label: str,
+    character_count: CharacterCount | None = None,
+    panel_count: PanelCount | None = None,
+) -> str:
     character_count_rule = build_character_count_rules(character_count)
+    panel_guidance = resolve_panel_count_guidance(panel_count)
+    resolved_panel_count = panel_count or DEFAULT_PANEL_COUNT
     return SYSTEM_PROMPT_BASE.format(
+        panel_count=resolved_panel_count,
+        panel_structure=panel_guidance["structure"],
+        panel_flow=f"Flow: {panel_guidance['flow']}",
         language_label=language_label,
         character_count_rule=character_count_rule,
     )

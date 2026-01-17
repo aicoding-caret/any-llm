@@ -65,6 +65,7 @@ async def generate_topic_from_elements(
     era_label = resolve_era_label(request.era)
     season_label = resolve_season_label(request.season)
     character_count = request.characterCount
+    panel_count = request.panelCount
     world_setting_block = build_world_setting_block(era_label, season_label)
     prompt = build_prompt(
         topic=fallback_topic,
@@ -73,6 +74,7 @@ async def generate_topic_from_elements(
         language_label=language_label,
         world_setting_block=world_setting_block,
         character_count=character_count,
+        panel_count=panel_count,
     )
 
     model_input = DEFAULT_MODEL
@@ -83,19 +85,22 @@ async def generate_topic_from_elements(
 
     try:
         logger.info(
-            "webtoon.topic-from-elements model=%s genre=%s language=%s era=%s season=%s characterCount=%s",
+            "webtoon.topic-from-elements request model=%s genre=%s language=%s era=%s season=%s characterCount=%s panelCount=%s sceneElements=%s",
             model_input,
             request.genre,
             resolved_language,
             request.era,
             request.season,
             character_count,
+            panel_count,
+            normalized_elements,
         )
         response = generate_text_content(
             client,
             model_input,
-            build_system_prompt(language_label, character_count),
+            build_system_prompt(language_label, character_count, panel_count),
             prompt,
+            temperature=0.9,  # Higher temperature for creative diversity
         )
 
         usage_info = getattr(response, "usage_metadata", None) or getattr(response, "usage", None)
@@ -122,7 +127,9 @@ async def generate_topic_from_elements(
             _add_user_spend(db, user_id, cost)
 
         text = get_response_text(response)
+        logger.info("Topic-from-elements raw response: %s", text[:500] if text else None)
         topic_text = parse_topic_text(text) if text else None
+        logger.info("Topic-from-elements parsed topic: %s", topic_text[:200] if topic_text else None)
         if not topic_text:
             logger.error("Topic-from-elements response invalid, falling back")
             return GenerateTopicFromElementsResponse(topic=fallback_topic)

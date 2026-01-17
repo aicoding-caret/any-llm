@@ -77,9 +77,15 @@ async def refine_dialogue(
 
     try:
         logger.info(
-            "webtoon.refine-dialogue request language=%s tone=%s",
+            "webtoon.refine-dialogue request language=%s tone=%s era=%s season=%s mode=%s dialogue=%s scene=%s speaker=%s",
             resolved_language,
             request.tone,
+            request.era,
+            request.season,
+            request.characterGenerationMode,
+            request.dialogue,
+            request.scene,
+            request.speaker,
         )
         response = generate_text_content(
             client,

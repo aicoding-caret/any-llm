@@ -1755,6 +1755,19 @@ async def generate_panel_image(
     analysis: AnalysisLevelType = payload.analysisLevel or "fast"
     cache_key = build_cache_key(payload, aspect_ratio, resolution, analysis)
 
+    logger.info(
+        "webtoon.generate-panel-image request panel=%s style=%s aspectRatio=%s resolution=%s analysisLevel=%s scene=%s dialogue=%s era=%s season=%s",
+        payload.panelNumber,
+        payload.style,
+        aspect_ratio,
+        resolution,
+        analysis,
+        payload.scene,
+        payload.dialogue,
+        payload.era,
+        payload.season,
+    )
+
     # Check for SSE streaming request
     accept_header = request.headers.get("accept", "")
     wants_stream = "text/event-stream" in accept_header

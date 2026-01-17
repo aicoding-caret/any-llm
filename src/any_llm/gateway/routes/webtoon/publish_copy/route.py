@@ -54,7 +54,13 @@ async def generate_publish_copy(
     client = create_genai_client(config)
 
     try:
-        logger.info("webtoon.generate-publish-copy request topic=%s", request.topic)
+        logger.info(
+            "webtoon.generate-publish-copy request topic=%s genre=%s style=%s scriptSummary=%s",
+            request.topic,
+            request.genre,
+            request.style,
+            request.scriptSummary,
+        )
         response = generate_text_content(
             client,
             model_input,

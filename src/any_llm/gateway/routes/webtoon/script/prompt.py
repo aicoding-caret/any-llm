@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .schema import Language, SceneElements
+from .schema import CharacterCount, Language, PanelCount, SceneElements
 
 STYLE_PROMPTS: dict[str, dict[str, str]] = {
     "webtoon": {
@@ -65,6 +65,47 @@ CARICATURE_GUIDE = (
     "If the character generation mode is caricature, keep dialogue short, conversational, and snappy. "
     "Prefer 1 concise sentence per line."
 )
+
+PANEL_COUNT_GUIDANCE: dict[int, dict[str, str]] = {
+    1: {
+        "structure": "single impactful scene",
+        "flow": "One dramatic moment capturing the entire story essence in a single powerful image",
+        "description": "Focus on maximum visual and emotional impact in one frame",
+    },
+    3: {
+        "structure": "setup → development → punchline/twist",
+        "flow": "Introduction → Build-up → Payoff",
+        "description": "Classic three-act structure condensed for quick storytelling",
+    },
+    4: {
+        "structure": "setup → development → climax → resolution",
+        "flow": "기(起) → 승(承) → 전(轉) → 결(結)",
+        "description": "Traditional 4-panel structure with clear narrative progression",
+    },
+    6: {
+        "structure": "extended narrative with emotional depth",
+        "flow": "Hook → Setup → Rising action → Climax → Falling action → Resolution",
+        "description": "Allows for more complex character development and subplot integration",
+    },
+}
+
+CHARACTER_COUNT_GUIDANCE: dict[str, dict[str, str]] = {
+    "solo": {
+        "count": "1 main character",
+        "interaction": "Inner monologue, self-reflection, or interaction with environment/objects",
+        "dialogue_style": "Soliloquy, thought bubbles, or narration",
+    },
+    "duo": {
+        "count": "2 main characters",
+        "interaction": "Dialogue exchange, relationship dynamics, contrast or complement",
+        "dialogue_style": "Back-and-forth conversation with distinct personalities",
+    },
+    "group": {
+        "count": "3-4 main characters",
+        "interaction": "Group dynamics, multiple perspectives, ensemble comedy or drama",
+        "dialogue_style": "Multi-character exchanges with varied voices",
+    },
+}
 
 ERA_IDS = ["any", "modern", "nineties", "seventies-eighties", "joseon", "future"]
 SEASON_IDS = ["any", "spring", "summer", "autumn", "winter"]
@@ -141,10 +182,29 @@ def build_topic_elements_block(elements: SceneElements | None) -> str:
         ]
     )
 
-def build_system_prompt(language: Language, style_prompt: dict[str, str]) -> str:
+def build_system_prompt(
+    language: Language,
+    style_prompt: dict[str, str],
+    panel_count: PanelCount | None = None,
+    character_count: CharacterCount | None = None,
+) -> str:
+    resolved_panel_count = panel_count or 4
+    resolved_character_count = character_count or "duo"
+    panel_guidance = PANEL_COUNT_GUIDANCE.get(resolved_panel_count, PANEL_COUNT_GUIDANCE[4])
+    char_guidance = CHARACTER_COUNT_GUIDANCE.get(resolved_character_count, CHARACTER_COUNT_GUIDANCE["duo"])
+
     return (
-        "You are a scriptwriter specialized in 4-panel webtoons.\n\n"
+        f"You are a scriptwriter specialized in {resolved_panel_count}-panel webtoons.\n\n"
         "Follow these rules without exception.\n\n"
+        "[Panel Structure]\n"
+        f"- Number of panels: {resolved_panel_count}\n"
+        f"- Narrative structure: {panel_guidance['structure']}\n"
+        f"- Story flow: {panel_guidance['flow']}\n"
+        f"- Focus: {panel_guidance['description']}\n\n"
+        "[Character Configuration]\n"
+        f"- Character count: {char_guidance['count']}\n"
+        f"- Interaction style: {char_guidance['interaction']}\n"
+        f"- Dialogue approach: {char_guidance['dialogue_style']}\n\n"
         "[General Rules]\n"
         "1. Output must be valid JSON only.\n"
         "2. Each panel's dialogue should fit directly into a speech bubble.\n"
@@ -159,7 +219,7 @@ def build_system_prompt(language: Language, style_prompt: dict[str, str]) -> str
         "11. Do not simply repeat the scene description word-for-word.\n"
         "12. Scene descriptions must include a visible emotional beat and one small sensory or atmosphere cue.\n"
         "13. The final panel must deliver the genre-appropriate payoff (comedy: punchline/reversal, drama: emotional closure, explanation: summary).\n"
-        "14. Use only the actual character names as speakers; do not invent a separate “narration” character or voice.\n"
+        '14. Use only the actual character names as speakers; do not invent a separate "narration" character or voice.\n'
         "15. If a world setting is provided, treat the era as mandatory and make it obvious in scenes and diction while keeping it easy to read.\n"
         "16. Avoid anachronisms that break the chosen era.\n"
         "17. Avoid trendy slang, memes, or references to real people.\n"
@@ -183,15 +243,25 @@ def build_user_prompt(
     caricature_mode: bool,
     world_setting: str,
     style_prompt: dict[str, str],
+    panel_count: PanelCount | None = None,
+    character_count: CharacterCount | None = None,
 ) -> str:
+    resolved_panel_count = panel_count or 4
+    resolved_character_count = character_count or "duo"
+    panel_guidance = PANEL_COUNT_GUIDANCE.get(resolved_panel_count, PANEL_COUNT_GUIDANCE[4])
+    char_guidance = CHARACTER_COUNT_GUIDANCE.get(resolved_character_count, CHARACTER_COUNT_GUIDANCE["duo"])
+
     topic_elements_block = build_topic_elements_block(normalized_elements)
     style_reference = [
         f"Style Prompt Reference: {style_prompt['name']}",
         f"Visual Tone Reference: {style_prompt['imagePrompt']}",
     ]
     lines = [
-        f"This is a 4-panel webtoon concept in the {genre} genre with the {style} style.",
+        f"This is a {resolved_panel_count}-panel webtoon concept in the {genre} genre with the {style} style.",
         f"Topic: {topic}",
+        "",
+        f"Panel Structure: {panel_guidance['structure']} ({panel_guidance['flow']})",
+        f"Character Setup: {char_guidance['count']} - {char_guidance['interaction']}",
     ]
     if topic_elements_block:
         lines.extend(["", topic_elements_block])
@@ -211,7 +281,8 @@ def build_user_prompt(
         [
             "",
             "Requirements:",
-            "- Provide exactly four panels.",
+            f"- Provide exactly {resolved_panel_count} panels.",
+            f"- Create {char_guidance['count']} with distinct personalities.",
             "- Each panel must include a concise scene description, a named speaker, and 1-3 dialogue lines.",
             "- Each panel must include sceneElements with the six keys: subject, action, setting, composition, lighting, style.",
             "- Keep each dialogue line to one short sentence; separate lines with \\n only.",
@@ -243,11 +314,11 @@ def build_user_prompt(
             "      ],",
             '      "characters": ["A", "B"]',
             "    },",
-            "    ...",
+            f"    ... (total {resolved_panel_count} panels)",
             "  ],",
             '  "mainCharacters": [',
             '    { "name": "...", "description": "...", "role": "..." },',
-            "    ...",
+            f"    ... ({char_guidance['count']})",
             "  ]",
             "}",
         ]

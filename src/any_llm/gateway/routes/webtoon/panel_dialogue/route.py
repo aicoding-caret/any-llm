@@ -82,10 +82,18 @@ async def generate_panel_dialogue(
 
     try:
         logger.info(
-            "webtoon.panel-dialogue request genre=%s panel=%s language=%s",
+            "webtoon.panel-dialogue request genre=%s panel=%s language=%s topic=%s style=%s era=%s season=%s scene=%s speakers=%s mode=%s sceneElements=%s",
             request.genre,
             request.panelNumber,
             resolved_language,
+            request.topic,
+            request.style,
+            request.era,
+            request.season,
+            request.scene,
+            request.speakers,
+            request.characterGenerationMode,
+            request.sceneElements,
         )
         response = generate_text_content(
             client,
