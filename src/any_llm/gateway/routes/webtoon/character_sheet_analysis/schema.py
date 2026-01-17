@@ -26,4 +26,4 @@ class CharacterSheetMetadata(BaseModel):
 class CharacterSheetResponse(BaseModel):
     metadata: CharacterSheetMetadata
 
-DEFAULT_MODEL = "gemini:gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-2.5-flash"

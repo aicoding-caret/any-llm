@@ -1,22 +1,22 @@
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
-from any_llm.types.completion import ChatCompletion
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from any_llm import AnyLLM, acompletion
 from any_llm.gateway.auth import verify_jwt_or_api_key_or_master
 from any_llm.gateway.auth.dependencies import get_config
 from any_llm.gateway.config import GatewayConfig
 from any_llm.gateway.db import APIKey, SessionToken, get_db
 from any_llm.gateway.log_config import logger
-from any_llm.gateway.routes.chat import (
-    _get_model_pricing,
-    _get_provider_kwargs,
-    _log_usage,
+from any_llm.gateway.routes.chat import _get_model_pricing
+from any_llm.gateway.routes.image import (
+    _add_user_spend,
+    _coerce_usage_metadata,
+    _log_image_usage,
+    _set_usage_cost,
 )
 from any_llm.gateway.routes.utils import (
     charge_usage_cost,
@@ -24,7 +24,8 @@ from any_llm.gateway.routes.utils import (
     validate_user_credit,
 )
 
-from .parser import build_fallback_topics, extract_text_from_response, parse_topic_candidates
+from ..genai_helper import create_genai_client, generate_text_content, get_response_text
+from .parser import build_fallback_topics, parse_topic_candidates
 from .prompt import LANGUAGE_LABELS, build_prompt, build_system_prompt, resolve_era_label, resolve_genre_prompt, resolve_season_label
 from .schema import DEFAULT_MODEL, GenerateTopicRequest, GenerateTopicResponse
 
@@ -51,53 +52,56 @@ async def generate_topic(
     genre_prompt = resolve_genre_prompt(request.genre)
     era_label = resolve_era_label(request.era)
     season_label = resolve_season_label(request.season)
-    prompt = build_prompt(genre_prompt, language_label, era_label, season_label)
+    character_count = request.characterCount
+    prompt = build_prompt(genre_prompt, language_label, era_label, season_label, character_count)
 
     model_input = request.model or DEFAULT_MODEL
-    provider, model = AnyLLM.split_model_provider(model_input)
-    model_key, model_pricing = _get_model_pricing(db, provider, model)
-    credentials = _get_provider_kwargs(config, provider)
+    provider_name = "gemini"
+    model_key, _ = _get_model_pricing(db, provider_name, model_input)
 
-    completion_kwargs = {
-        "model": model_input,
-        "messages": [
-            {"role": "system", "content": build_system_prompt(language_label)},
-            {"role": "user", "content": prompt},
-        ],
-        "user": user_id,
-        **credentials,
-        "stream": False,
-    }
+    client = create_genai_client(config)
 
     try:
         logger.info(
-            "webtoon.topic request model=%s genre=%s language=%s era=%s season=%s",
+            "webtoon.topic request model=%s genre=%s language=%s era=%s season=%s characterCount=%s",
             model_input,
             request.genre,
             resolved_language,
             request.era,
             request.season,
+            character_count,
         )
-        response = cast(ChatCompletion, await acompletion(**completion_kwargs))
-        usage_log_id = await _log_usage(
+        response = generate_text_content(
+            client,
+            model_input,
+            build_system_prompt(language_label, character_count),
+            prompt,
+        )
+
+        usage_info = getattr(response, "usage_metadata", None) or getattr(response, "usage", None)
+        usage_for_charge = _coerce_usage_metadata(usage_info) or usage_info
+        usage_log_id = _log_image_usage(
             db=db,
             api_key_obj=api_key,
-            model=model,
-            provider=provider,
+            model=model_input,
+            provider=provider_name,
             endpoint="/v1/webtoon/topic",
             user_id=user_id,
-            response=response,
-            model_key=model_key,
-            model_pricing=model_pricing,
+            usage=usage_for_charge,
         )
-        charge_usage_cost(
-            db,
-            user_id=user_id,
-            usage=getattr(response, "usage", None),
-            model_key=model_key,
-            usage_id=usage_log_id,
-        )
-        text = extract_text_from_response(response)
+
+        if usage_for_charge:
+            cost = charge_usage_cost(
+                db,
+                user_id=user_id,
+                usage=usage_for_charge,
+                model_key=model_key,
+                usage_id=usage_log_id,
+            )
+            _set_usage_cost(db, usage_log_id, cost)
+            _add_user_spend(db, user_id, cost)
+
+        text = get_response_text(response)
         parsed = parse_topic_candidates(text) if text else None
         if not parsed:
             logger.error("Invalid response schema for topics")
@@ -107,15 +111,4 @@ async def generate_topic(
         raise
     except Exception as exc:
         logger.error("Topic generation failed: %s", exc)
-        await _log_usage(
-            db=db,
-            api_key_obj=api_key,
-            model=model,
-            provider=provider,
-            endpoint="/v1/webtoon/topic",
-            user_id=user_id,
-            model_key=model_key,
-            model_pricing=model_pricing,
-            error=str(exc),
-        )
         return build_fallback_topics(genre_prompt["title"], resolved_language)

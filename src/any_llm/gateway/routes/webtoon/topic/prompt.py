@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Iterable
 
-from .schema import ERA_IDS, SEASON_IDS, Language
+from .schema import CHARACTER_COUNT_IDS, DEFAULT_PANEL_COUNT, ERA_IDS, PANEL_COUNT_IDS, SEASON_IDS, CharacterCount, Language, PanelCount
 
 LANGUAGE_LABELS: dict[Language, str] = {
     "ko": "Korean",
@@ -10,7 +10,25 @@ LANGUAGE_LABELS: dict[Language, str] = {
     "ja": "Japanese",
 }
 
-SYSTEM_PROMPT_TEMPLATE = (
+CHARACTER_COUNT_GUIDANCE: dict[str, dict[str, str]] = {
+    "solo": {
+        "rule": "Each topic should focus on a single character's internal journey, monologue, or self-reflection.",
+        "subject_hint": "a single character (e.g., 'a person', 'an office worker', 'a student')",
+        "action_hint": "solo activity or internal moment (e.g., 'reflecting on', 'realizing', 'experiencing')",
+    },
+    "duo": {
+        "rule": "Each topic MUST feature exactly 2 characters interacting with each other through dialogue or action.",
+        "subject_hint": "2 characters with their relationship (e.g., 'two friends', 'a couple', 'coworkers', 'parent and child')",
+        "action_hint": "interaction between characters (e.g., 'arguing about', 'laughing together', 'surprising each other')",
+    },
+    "group": {
+        "rule": "Each topic MUST feature 3 or more characters interacting in a group dynamic.",
+        "subject_hint": "3+ characters (e.g., 'a group of friends', 'family members', 'a team', 'classmates')",
+        "action_hint": "group interaction (e.g., 'debating together', 'celebrating', 'reacting to news')",
+    },
+}
+
+SYSTEM_PROMPT_BASE = (
     "You are a 4-panel webtoon planner.\n"
     "You are tasked with suggesting high-potential topics aligned with the selected genre.\n\n"
     "Common rules:\n"
@@ -23,20 +41,32 @@ SYSTEM_PROMPT_TEMPLATE = (
     "7. Every topic should be ready for immediate scriptwriting.\n"
     "8. Each candidate must include sceneElements with subject, action, setting, composition, lighting, and style.\n"
     "9. Each description must be a single paragraph that integrates the six elements naturally (no bullet lists).\n"
-    "10. All text values must be written in {language_label}."
+    "10. All text values must be written in {language_label}.\n"
+    "{character_count_rule}"
+)
+
+# Keep for backward compatibility
+SYSTEM_PROMPT_TEMPLATE = SYSTEM_PROMPT_BASE.format(
+    language_label="{language_label}",
+    character_count_rule=(
+        "11. IMPORTANT: Each topic MUST feature at least 2 characters interacting with each other.\n"
+        "12. Avoid first-person-only scenarios. Show dialogue, reactions, or interactions between characters.\n"
+        "13. The subject field should include multiple characters (e.g., 'A and B', 'friends', 'couple', 'coworkers')."
+    ),
 )
 
 GENRE_TEMPLATES: dict[str, dict[str, str]] = {
     "daily": {
         "title": "Relatable Daily Life & Comedy",
         "criteria": (
-            "- Situations anyone could encounter\n"
+            "- Situations anyone could encounter with friends, family, or coworkers\n"
             "- In a four-panel structure, the last panel has a funny twist or relatable punchline\n"
-            "- More realistic than exaggerated"
+            "- More realistic than exaggerated\n"
+            "- Must show interaction between 2+ characters"
         ),
         "request": (
             "Suggest 5 webtoon topics about small daily inconveniences, bittersweet-funny moments,"
-            " and relatable reality."
+            " and relatable reality involving interactions between characters."
         ),
     },
     "pets": {
@@ -51,10 +81,11 @@ GENRE_TEMPLATES: dict[str, dict[str, str]] = {
     "emotional": {
         "title": "Heartwarming / Healing",
         "criteria": (
-            "- Small changes felt in family, friendship, or one's relationship with oneself\n"
-            "- Gentle aftertaste; the final panel resolves the emotion or delivers the message"
+            "- Small changes felt in family, friendship, or romantic relationships\n"
+            "- Gentle aftertaste; the final panel resolves the emotion or delivers the message\n"
+            "- Focus on meaningful interactions between characters"
         ),
-        "request": "Suggest 5 topics for short but heartwarming stories.",
+        "request": "Suggest 5 topics for short but heartwarming stories featuring interactions between family, friends, or loved ones.",
     },
     "satire": {
         "title": "Social Satire",
@@ -70,9 +101,10 @@ GENRE_TEMPLATES: dict[str, dict[str, str]] = {
         "criteria": (
             "- Focus on everyday realizations without being too preachy\n"
             "- Structure that shows behavior change or mindset shifts\n"
-            "- The final panel clearly conveys the message"
+            "- The final panel clearly conveys the message\n"
+            "- Show growth through conversations with mentors, friends, or colleagues"
         ),
-        "request": "Suggest 5 webtoon topics with the keywords habits, growth, and mindset shifts.",
+        "request": "Suggest 5 webtoon topics with the keywords habits, growth, and mindset shifts, featuring dialogue between characters.",
     },
     "concept": {
         "title": "Concept Explanation & Principles",
@@ -187,8 +219,15 @@ def build_world_setting_block(era_label: str | None, season_label: str | None) -
     return "\n".join(lines)
 
 
-def build_prompt(genre_prompt: dict[str, str], language_label: str, era_label: str | None, season_label: str | None) -> str:
+def build_prompt(
+    genre_prompt: dict[str, str],
+    language_label: str,
+    era_label: str | None,
+    season_label: str | None,
+    character_count: CharacterCount | None = None,
+) -> str:
     world_setting_block = build_world_setting_block(era_label, season_label)
+    guidance = resolve_character_count_guidance(character_count)
     prompt_lines = [
         f"Genre: {genre_prompt['title']}",
         "",
@@ -196,8 +235,8 @@ def build_prompt(genre_prompt: dict[str, str], language_label: str, era_label: s
         genre_prompt["criteria"],
         "",
         "Scene Elements Guidance:",
-        "- subject: protagonist or main focus",
-        "- action: key action or moment",
+        f"- subject: {guidance['subject_hint']}",
+        f"- action: {guidance['action_hint']}",
         "- setting: place, time, or environment",
         "- composition: camera angle or framing",
         "- lighting: light direction or time of day",
@@ -238,5 +277,27 @@ def build_prompt(genre_prompt: dict[str, str], language_label: str, era_label: s
     return "\n".join(prompt_lines)
 
 
-def build_system_prompt(language_label: str) -> str:
-    return SYSTEM_PROMPT_TEMPLATE.format(language_label=language_label)
+def resolve_character_count_guidance(character_count: CharacterCount | None) -> dict[str, str]:
+    """Return guidance for the given character count setting."""
+    if character_count and character_count in CHARACTER_COUNT_GUIDANCE:
+        return CHARACTER_COUNT_GUIDANCE[character_count]
+    # Default to duo (2 characters) for best webtoon results
+    return CHARACTER_COUNT_GUIDANCE["duo"]
+
+
+def build_character_count_rules(character_count: CharacterCount | None) -> str:
+    """Build the character count rules for the system prompt."""
+    guidance = resolve_character_count_guidance(character_count)
+    return (
+        f"11. IMPORTANT: {guidance['rule']}\n"
+        f"12. The subject field should describe: {guidance['subject_hint']}.\n"
+        f"13. The action field should describe: {guidance['action_hint']}."
+    )
+
+
+def build_system_prompt(language_label: str, character_count: CharacterCount | None = None) -> str:
+    character_count_rule = build_character_count_rules(character_count)
+    return SYSTEM_PROMPT_BASE.format(
+        language_label=language_label,
+        character_count_rule=character_count_rule,
+    )

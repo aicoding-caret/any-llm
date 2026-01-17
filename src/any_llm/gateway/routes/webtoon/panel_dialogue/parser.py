@@ -63,3 +63,16 @@ def parse_dialogue(response: Any) -> GeneratePanelDialogueResponse | None:
         return GeneratePanelDialogueResponse.model_validate(parsed)
     except Exception:
         return None
+
+
+def parse_dialogue_from_text(text: str) -> GeneratePanelDialogueResponse | None:
+    """Parse dialogue response from raw text (for genai responses)."""
+    if not text:
+        return None
+    parsed = extract_json(clean_text(text))
+    if not parsed:
+        return None
+    try:
+        return GeneratePanelDialogueResponse.model_validate(parsed)
+    except Exception:
+        return None

@@ -41,4 +41,4 @@ class GeneratePanelDialogueRequest(BaseModel):
 class GeneratePanelDialogueResponse(BaseModel):
     dialogueLines: Sequence[DialogueLine]
 
-DEFAULT_MODEL = "gemini:gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-2.5-flash"

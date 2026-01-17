@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .schema import Language, SceneElements
+from .schema import CharacterCount, Language, SceneElements
 
 LANGUAGE_LABELS: dict[Language, str] = {
     "ko": "한국어",
@@ -64,6 +64,21 @@ def resolve_season_label(value: str | None) -> str | None:
     return labels.get(season)
 
 
+CHARACTER_COUNT_RULES: dict[str, str] = {
+    "solo": "- The topic should focus on a single character's internal journey, monologue, or self-reflection.",
+    "duo": "- IMPORTANT: The topic MUST feature exactly 2 characters interacting with each other through dialogue or action.",
+    "group": "- IMPORTANT: The topic MUST feature 3 or more characters interacting in a group dynamic.",
+}
+
+
+def resolve_character_count_rule(character_count: CharacterCount | None) -> str:
+    """Return the character count rule for the prompt."""
+    if character_count and character_count in CHARACTER_COUNT_RULES:
+        return CHARACTER_COUNT_RULES[character_count]
+    # Default to duo for best webtoon results
+    return CHARACTER_COUNT_RULES["duo"]
+
+
 def build_world_setting_block(era_label: str | None, season_label: str | None) -> str:
     if not era_label and not season_label:
         return ""
@@ -88,7 +103,9 @@ def build_prompt(
     genre: str | None,
     language_label: str,
     world_setting_block: str,
+    character_count: CharacterCount | None = None,
 ) -> str:
+    character_rule = resolve_character_count_rule(character_count)
     lines = [
         "You are a planner refining the topic for a 4-panel webtoon.",
         "",
@@ -101,6 +118,7 @@ def build_prompt(
         "- No bullets, numbering, headings, quotes, or parenthetical explanations.",
         "- Avoid abstract lists; include concrete scene details.",
         "- The situation must be suitable for a 4-panel progression.",
+        character_rule,
         "",
         f"Genre: {genre or '정보 없음'}",
     ]

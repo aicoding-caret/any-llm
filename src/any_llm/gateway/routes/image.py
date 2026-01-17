@@ -101,7 +101,7 @@ def _parse_reference_image(data_url: str) -> tuple[str, bytes]:
     return mime_type, image_bytes
 
 
-def _create_inline_part(image_bytes: bytes, mime_type: str) -> object:
+def _create_inline_part(image_bytes: bytes, mime_type: str) -> Any:
     part_cls = genai.types.Part
     if hasattr(part_cls, "from_bytes"):
         return part_cls.from_bytes(data=image_bytes, mime_type=mime_type)
@@ -121,8 +121,8 @@ def _create_inline_part(image_bytes: bytes, mime_type: str) -> object:
     )
 
 
-def _build_contents(prompt: str, reference_images: list[str] | None) -> list[object]:
-    parts: list[object] = []
+def _build_contents(prompt: str, reference_images: list[str] | None) -> list[Any]:
+    parts: list[Any] = []
     for data_url in reference_images or []:
         mime_type, image_bytes = _parse_reference_image(data_url)
         parts.append(_create_inline_part(image_bytes, mime_type))
@@ -352,7 +352,7 @@ async def generate_image(
             image_size=image_size,
         )
 
-        config_kwargs: dict[str, object] = {
+        config_kwargs: dict[str, Any] = {
             "response_modalities": ["Text", "Image"],
             "image_config": image_config,
             "candidate_count": 1,
@@ -374,7 +374,7 @@ async def generate_image(
             return None
         return value.replace("[", "\\[").replace("]", "\\]")
 
-    def _iter_parts(chunk) -> list[object]:
+    def _iter_parts(chunk) -> list[Any]:
         parts = getattr(chunk, "parts", None)
         if parts:
             return parts
@@ -485,7 +485,8 @@ async def generate_image(
                         usage_accumulator.record(chunk_usage)
                     for part in parts:
                         text_value = getattr(part, "text", None)
-                        text_snippet = _sanitize_for_logging(text_value)[:120] if isinstance(text_value, str) else None
+                        sanitized = _sanitize_for_logging(text_value)
+                        text_snippet = sanitized[:120] if sanitized else None
                         if isinstance(text_value, str) and text_value:
                             logger.info(
                                 "stream part chunk=%d thought=%s text_snippet=%s",

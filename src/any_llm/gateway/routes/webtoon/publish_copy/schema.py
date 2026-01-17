@@ -22,4 +22,4 @@ class GeneratePublishCopyResponse(BaseModel):
     description: str
 
 
-DEFAULT_MODEL = "gemini:gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-2.5-flash"

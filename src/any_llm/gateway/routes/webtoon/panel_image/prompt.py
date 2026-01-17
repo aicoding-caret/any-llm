@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Iterable
 
+from .schema import AspectRatioType, ResolutionType
+
 ERA_IDS = ["any", "modern", "nineties", "seventies-eighties", "joseon", "future"]
 SEASON_IDS = ["any", "spring", "summer", "autumn", "winter"]
 
@@ -73,6 +75,7 @@ def build_scene_summary(elements: dict[str, str] | None, fallback: str) -> str:
     return summary or fallback
 
 
+
 def build_prompt(
     *,
     topic: str | None,
@@ -84,8 +87,8 @@ def build_prompt(
     revision_note: str | None,
     scene_elements_block: str,
     world_setting_block: str,
-    aspect_ratio: str,
-    resolution: str,
+    aspect_ratio: AspectRatioType,
+    resolution: ResolutionType,
 ) -> str:
     character_block = "\n".join(characters)
     description_block = "\n".join(description for description in descriptions or [] if description)
@@ -105,4 +108,5 @@ Revision note: {revision_note or "없음"}"""
         base += f"\n{world_setting_block}"
     return f"""You are producing a consistent webtoon panel illustration.
 Follow all guidelines above and keep the artistic tone aligned with previous panels.
-Return JSON with fields "scene" (text for metadata) and "image" (base64 inline data)."""
+If you provide text, return a short JSON object with a "scene" field for metadata.
+Do not include base64 image data in the text response."""

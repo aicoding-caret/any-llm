@@ -124,6 +124,17 @@ def _extract_json_from_text(text: str | None) -> Any | None:
     return None
 
 
+def _get_response_parts(response: Any) -> list[Any]:
+    parts = getattr(response, "parts", None) or []
+    if parts:
+        return parts
+    candidates = getattr(response, "candidates", None) or []
+    if candidates:
+        content = getattr(candidates[0], "content", None)
+        return getattr(content, "parts", None) or []
+    return []
+
+
 def _build_prompt_for_character(
     request: GenerateCharacterSheetRequest,
     character_name: str,
@@ -242,7 +253,7 @@ async def generate_character_sheet(
             character.name,
             character.description,
         )
-        contents = _build_contents(prompt_text, None)
+        contents: Any = _build_contents(prompt_text, None)
 
         try:
             response = client.models.generate_content(
@@ -257,7 +268,7 @@ async def generate_character_sheet(
             )
             continue
 
-        parts = getattr(response, "parts", None) or []
+        parts = _get_response_parts(response)
         image_bytes, mime_type, _, _ = _extract_image_parts(parts)
         usage_info = getattr(response, "usage_metadata", None) or getattr(response, "usage", None)
         usage_for_charge = _coerce_usage_metadata(usage_info) or usage_info

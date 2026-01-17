@@ -56,4 +56,4 @@ class GenerateScriptResponse(BaseModel):
     mainCharacters: Sequence[MainCharacter]
 
 
-DEFAULT_MODEL = "gemini:gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-2.5-flash"

@@ -128,6 +128,17 @@ def _extract_text(candidate: Any) -> str:
     return "\n".join(fragments).strip()
 
 
+def _get_response_parts(response: Any) -> list[Any]:
+    parts = getattr(response, "parts", None) or []
+    if parts:
+        return parts
+    candidates = getattr(response, "candidates", None) or []
+    if candidates:
+        content = getattr(candidates[0], "content", None)
+        return getattr(content, "parts", None) or []
+    return []
+
+
 def _build_metadata_text(client: Any, image_bytes: bytes, mime_type: str) -> str:
     assert genai is not None
     parts = [
@@ -217,7 +228,7 @@ async def generate_caricature_sheet(
     )
 
     prompt_text = build_prompt(request, mime_type)
-    contents = _build_contents(prompt_text, [f"data:{mime_type};base64,{payload_data}"])
+    contents: Any = _build_contents(prompt_text, [f"data:{mime_type};base64,{payload_data}"])
 
     try:
         response = client.models.generate_content(
@@ -229,7 +240,7 @@ async def generate_caricature_sheet(
         logger.error("Caricature generation failed for %s: %s", request.name, exc)
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Caricature generation failed") from exc
 
-    parts = getattr(response, "parts", None) or []
+    parts = _get_response_parts(response)
     image_bytes, result_mime, _, _ = _extract_image_parts(parts)
     if not image_bytes:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="No image returned")
